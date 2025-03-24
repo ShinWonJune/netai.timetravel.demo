@@ -8,5 +8,6 @@
 
 For importing `pxr`
 ```x64 Native Tools Command Prompt
+# x64 Native Tools Command Prompt
 C:\> python OpenUSD\build_scripts\build_usd.py "C:\path\to\my_usd_install_dir"
 ```
