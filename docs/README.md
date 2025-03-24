@@ -4,7 +4,7 @@
 - Omniverse Kit
 - USD package
 	- https://github.com/PixarAnimationStudios/OpenUSD?tab=readme-ov-file
-	- PySide6,PyOpenGL
+- PySide6,PyOpenGL
 
 For importing `pxr`
 ```x64 Native Tools Command Prompt
