@@ -4,7 +4,7 @@ Optimized data structures for high-performance time travel (no pandas)
 """
 import numpy as np
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 import datetime
 
 @dataclass
@@ -20,11 +20,11 @@ class OptimizedSensorData:
     """
     Optimized sensor data storage using numpy arrays for performance
     """
-    def __init__(self, sensor_id):  # sensor_id는 이제 objId(int) 또는 문자열
+    def __init__(self, sensor_id: Union[int, str]):
         self.sensor_id = sensor_id
         
-        # Pre-allocate numpy arrays for performance
-        self.capacity = 100000  # Initial capacity
+        # Pre-allocate numpy arrays for performance (한달치 데이터 고려)
+        self.capacity = 50000  # 1분마다 * 60 * 24 * 31일 = 약 45,000개
         self.size = 0
         
         # Time stored as int64 (nanoseconds since epoch)
@@ -36,6 +36,9 @@ class OptimizedSensorData:
         self.humidity_cold = np.zeros(self.capacity, dtype=np.float32)
         self.humidity_hot = np.zeros(self.capacity, dtype=np.float32)
         
+        # 정렬 상태 추적
+        self._is_sorted = True
+        
     def add_data(self, timestamp: datetime.datetime, temp_cold: float, temp_hot: float, 
                  hum_cold: float, hum_hot: float):
         """Add a single data point"""
@@ -44,6 +47,10 @@ class OptimizedSensorData:
             
         # Convert timestamp to nanoseconds
         ts_ns = int(timestamp.timestamp() * 1_000_000_000)
+        
+        # 정렬 상태 체크 (새 데이터가 이전 데이터보다 작으면 정렬 깨짐)
+        if self.size > 0 and ts_ns < self.timestamps[self.size - 1]:
+            self._is_sorted = False
         
         self.timestamps[self.size] = ts_ns
         self.temp_cold[self.size] = temp_cold
@@ -67,29 +74,50 @@ class OptimizedSensorData:
             
         if self.size + n_rows > self.capacity:
             self._grow_arrays(self.size + n_rows)
-            
-        # Convert timestamps to nanoseconds
+        
+        # 배치로 데이터 추가 (성능 최적화)
+        start_idx = self.size
+        valid_count = 0
+        
         for i in range(n_rows):
             try:
                 if isinstance(timestamps[i], str):
-                    # Parse ISO format timestamp
-                    dt = datetime.datetime.fromisoformat(timestamps[i].replace('Z', '+00:00'))
+                    # Parse ISO format timestamp - KST 기준
+                    dt_str = timestamps[i].replace('Z', '+09:00') if 'Z' in timestamps[i] else timestamps[i]
+                    dt = datetime.datetime.fromisoformat(dt_str)
                     ts_ns = int(dt.timestamp() * 1_000_000_000)
                 else:
                     # Assume already a datetime object
                     ts_ns = int(timestamps[i].timestamp() * 1_000_000_000)
                     
-                self.timestamps[self.size + i] = ts_ns
-                self.temp_cold[self.size + i] = float(temp_cold[i]) if i < len(temp_cold) else 0.0
-                self.temp_hot[self.size + i] = float(temp_hot[i]) if i < len(temp_hot) else 0.0
-                self.humidity_cold[self.size + i] = float(hum_cold[i]) if i < len(hum_cold) else 0.0
-                self.humidity_hot[self.size + i] = float(hum_hot[i]) if i < len(hum_hot) else 0.0
+                self.timestamps[start_idx + valid_count] = ts_ns
+                self.temp_cold[start_idx + valid_count] = float(temp_cold[i]) if i < len(temp_cold) else 0.0
+                self.temp_hot[start_idx + valid_count] = float(temp_hot[i]) if i < len(temp_hot) else 0.0
+                self.humidity_cold[start_idx + valid_count] = float(hum_cold[i]) if i < len(hum_cold) else 0.0
+                self.humidity_hot[start_idx + valid_count] = float(hum_hot[i]) if i < len(hum_hot) else 0.0
+                
+                valid_count += 1
                 
             except (ValueError, IndexError):
                 # Skip invalid data points
                 continue
                 
-        self.size += n_rows
+        self.size += valid_count
+        self._is_sorted = False  # 새 데이터 추가 후 정렬 필요
+        
+    def _ensure_sorted(self):
+        """데이터가 정렬되어 있는지 확인하고 필요시 정렬"""
+        if not self._is_sorted and self.size > 0:
+            # 모든 배열을 시간순으로 정렬
+            sort_indices = np.argsort(self.timestamps[:self.size])
+            
+            self.timestamps[:self.size] = self.timestamps[sort_indices]
+            self.temp_cold[:self.size] = self.temp_cold[sort_indices]
+            self.temp_hot[:self.size] = self.temp_hot[sort_indices]
+            self.humidity_cold[:self.size] = self.humidity_cold[sort_indices]
+            self.humidity_hot[:self.size] = self.humidity_hot[sort_indices]
+            
+            self._is_sorted = True
         
     def _grow_arrays(self, min_capacity=None):
         """Grow arrays when capacity is reached"""
@@ -118,43 +146,18 @@ class OptimizedSensorData:
         self.humidity_hot = new_humidity_hot
         self.capacity = new_capacity
         
-    def get_at_time(self, target_time: datetime.datetime) -> Optional[Dict]:
-        """Get sensor values at specific time using binary search"""
-        if self.size == 0:
-            return None
-            
-        # Convert target time to nanoseconds
-        target_ns = int(target_time.timestamp() * 1_000_000_000)
-        
-        # Binary search on timestamps
-        idx = np.searchsorted(self.timestamps[:self.size], target_ns)
-        
-        # Handle edge cases
-        if idx == 0:
-            # Use first value
-            return self._get_values_at_index(0)
-        elif idx >= self.size:
-            # Use last value
-            return self._get_values_at_index(self.size - 1)
-        else:
-            # Find closest value
-            time_before = self.timestamps[idx - 1]
-            time_after = self.timestamps[idx]
-            
-            if (target_ns - time_before) < (time_after - target_ns):
-                return self._get_values_at_index(idx - 1)
-            else:
-                return self._get_values_at_index(idx)
-                
     def get_interpolated_at_time(self, target_time: datetime.datetime) -> Optional[Dict]:
-        """Get interpolated sensor values at specific time"""
+        """Get interpolated sensor values at specific time (최고 성능)"""
         if self.size == 0:
             return None
+            
+        # 정렬 보장
+        self._ensure_sorted()
             
         # Convert target time to nanoseconds
         target_ns = int(target_time.timestamp() * 1_000_000_000)
         
-        # Binary search on timestamps
+        # Binary search on timestamps (O(log n))
         idx = np.searchsorted(self.timestamps[:self.size], target_ns)
         
         # Handle edge cases
@@ -163,7 +166,7 @@ class OptimizedSensorData:
         elif idx >= self.size:
             return self._get_values_at_index(self.size - 1)
         else:
-            # Linear interpolation
+            # Linear interpolation between two closest points
             t0 = self.timestamps[idx - 1]
             t1 = self.timestamps[idx]
             
@@ -196,10 +199,13 @@ class OptimizedSensorData:
     def clear(self):
         """Clear all data"""
         self.size = 0
+        self._is_sorted = True
         
     def trim_to_size(self):
         """Trim arrays to actual size to save memory"""
         if self.size < self.capacity:
+            self._ensure_sorted()  # 정렬 후 트림
+            
             self.timestamps = self.timestamps[:self.size].copy()
             self.temp_cold = self.temp_cold[:self.size].copy()
             self.temp_hot = self.temp_hot[:self.size].copy()
@@ -207,15 +213,14 @@ class OptimizedSensorData:
             self.humidity_hot = self.humidity_hot[:self.size].copy()
             self.capacity = self.size
 
-
 class SensorDataCache:
     """
     High-performance cache for all sensor data
     """
     def __init__(self):
-        self._sensors: Dict[int, OptimizedSensorData] = {}  # int 키 사용
+        self._sensors: Dict[int, OptimizedSensorData] = {}
         
-    def get_sensor_data(self, sensor_id: int) -> OptimizedSensorData:  # int 타입으로 변경
+    def get_sensor_data(self, sensor_id: int) -> OptimizedSensorData:
         """Get or create sensor data container using objId"""
         if sensor_id not in self._sensors:
             self._sensors[sensor_id] = OptimizedSensorData(sensor_id)
@@ -227,14 +232,15 @@ class SensorDataCache:
             sensor_data.clear()
             
     def optimize(self):
-        """Optimize memory usage by trimming arrays"""
+        """Optimize memory usage by trimming arrays and sorting"""
         for sensor_data in self._sensors.values():
+            sensor_data._ensure_sorted()
             sensor_data.trim_to_size()
             
     def get_total_records(self) -> int:
         """Get total number of records across all sensors"""
         return sum(sensor_data.size for sensor_data in self._sensors.values())
         
-    def get_sensor_ids(self) -> List[str]:
+    def get_sensor_ids(self) -> List[int]:
         """Get list of all sensor IDs"""
         return list(self._sensors.keys())
