@@ -302,11 +302,6 @@ class TimeController:
         try:
             csv_path = os.path.join(os.path.dirname(__file__), "fms_temphum_0327.csv")
             
-            # if not os.path.exists(csv_path):
-            #     # 테스트를 위해 기존 CSV 파일로 폴백
-            #     csv_path = os.path.join(os.path.dirname(__file__), "fms_temphum_objId21_last24h.csv")
-            #     print(f"[netai.timetravel.demo] fms_temphum_0327.csv 파일이 없습습니다: {csv_path}")
-            
             with open(csv_path, 'r') as file:
                 reader = csv.DictReader(file)
                 data_list = list(reader)
@@ -328,10 +323,6 @@ class TimeController:
                 if obj_id not in self._sensor_data:
                     self._sensor_data[obj_id] = []
                 self._sensor_data[obj_id].append(entry)
-            
-            # # 각 센서 데이터를 타임스탬프 기준으로 정렬
-            # for obj_id in self._sensor_data:
-            #     self._sensor_data[obj_id].sort(key=lambda x: x["@timestamp"])
             
             # 결과 요약
             total_entries = sum(len(data) for data in self._sensor_data.values())

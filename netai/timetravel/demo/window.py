@@ -3,7 +3,9 @@ import omni.ui as ui
 import datetime
 import omni.usd
 from pxr import Usd, UsdGeom
-
+#------------------------------------
+# 세로로 콤팩트하게 정열
+#------------------------------------
 class TimeWindowUI:
     """Time Travel Window for Datacenter Digital Twin"""
     
@@ -16,52 +18,12 @@ class TimeWindowUI:
         # 윈도우 생성
         self._window = ui.Window("Time Travel", width=550, height=500)
         
-        # 선택 리스너 관련 변수
+        # 선택 리스너 생성
         self._usd_context = omni.usd.get_context()
         self._selection_changed_sub = None
-        
-        # UI 요소 레퍼런스 초기화
-        self._start_year = None
-        self._start_month = None
-        self._start_day = None
-        self._start_hour = None
-        self._start_minute = None
-        self._start_second = None
-        self._end_year = None
-        self._end_month = None
-        self._end_day = None
-        self._end_hour = None
-        self._end_minute = None
-        self._end_second = None
-        self._goto_year = None
-        self._goto_month = None
-        self._goto_day = None
-        self._goto_hour = None
-        self._goto_minute = None
-        self._goto_second = None
-        self._apply_button = None
-        self._present_button = None
-        self._goto_button = None
-        self._stage_time_label = None
-        self._play_button = None
-        self._speed_field = None
-        self._selected_rack_label = None
-        self._cold_temp_label = None
-        self._cold_humidity_label = None
-        self._hot_temp_label = None
-        self._hot_humidity_label = None
-        self._time_slider = None
-        self._rack_count_label = None
-        self._sensor_count_label = None
-        
-        # UI 생성
-        self._create_ui()
-        
-        # UI 생성 완료 후 선택 리스너 설정
         self._setup_selection_listener()
-    
-    def _create_ui(self):
-        """UI 생성"""
+        
+        # 단일 열 레이아웃 구성
         with self._window.frame:
             with ui.VStack(spacing=5):
                 # 1. 상단 섹션: 제목
@@ -74,43 +36,43 @@ class TimeWindowUI:
                     with ui.HStack(height=20):
                         ui.Label("Start:", width=50)
                         self._start_year = ui.IntField(width=40)
-                        self._start_year.model.set_value(self._get_safe_start_time().year)
+                        self._start_year.model.set_value(self._controller.get_start_time().year)
                         ui.Label("/", width=10)
                         self._start_month = ui.IntField(width=30)
-                        self._start_month.model.set_value(self._get_safe_start_time().month)
+                        self._start_month.model.set_value(self._controller.get_start_time().month)
                         ui.Label("/", width=10)
                         self._start_day = ui.IntField(width=30)
-                        self._start_day.model.set_value(self._get_safe_start_time().day)
+                        self._start_day.model.set_value(self._controller.get_start_time().day)
                         ui.Label(" ", width=10)
                         self._start_hour = ui.IntField(width=30)
-                        self._start_hour.model.set_value(self._get_safe_start_time().hour)
+                        self._start_hour.model.set_value(self._controller.get_start_time().hour)
                         ui.Label(":", width=10)
                         self._start_minute = ui.IntField(width=30)
-                        self._start_minute.model.set_value(self._get_safe_start_time().minute)
+                        self._start_minute.model.set_value(self._controller.get_start_time().minute)
                         ui.Label(":", width=10)
                         self._start_second = ui.IntField(width=30)
-                        self._start_second.model.set_value(self._get_safe_start_time().second)
+                        self._start_second.model.set_value(self._controller.get_start_time().second)
                     
                     # 종료 시간 입력
                     with ui.HStack(height=20):
                         ui.Label("End:", width=50)
                         self._end_year = ui.IntField(width=40)
-                        self._end_year.model.set_value(self._get_safe_end_time().year)
+                        self._end_year.model.set_value(self._controller.get_end_time().year)
                         ui.Label("/", width=10)
                         self._end_month = ui.IntField(width=30)
-                        self._end_month.model.set_value(self._get_safe_end_time().month)
+                        self._end_month.model.set_value(self._controller.get_end_time().month)
                         ui.Label("/", width=10)
                         self._end_day = ui.IntField(width=30)
-                        self._end_day.model.set_value(self._get_safe_end_time().day)
+                        self._end_day.model.set_value(self._controller.get_end_time().day)
                         ui.Label(" ", width=10)
                         self._end_hour = ui.IntField(width=30)
-                        self._end_hour.model.set_value(self._get_safe_end_time().hour)
+                        self._end_hour.model.set_value(self._controller.get_end_time().hour)
                         ui.Label(":", width=10)
                         self._end_minute = ui.IntField(width=30)
-                        self._end_minute.model.set_value(self._get_safe_end_time().minute)
+                        self._end_minute.model.set_value(self._controller.get_end_time().minute)
                         ui.Label(":", width=10)
                         self._end_second = ui.IntField(width=30)
-                        self._end_second.model.set_value(self._get_safe_end_time().second)
+                        self._end_second.model.set_value(self._controller.get_end_time().second)
                     
                     # Apply 버튼
                     with ui.HStack(height=20):
@@ -125,25 +87,24 @@ class TimeWindowUI:
                     with ui.HStack(height=20):
                         ui.Label("Go to:", width=50)
                         self._goto_year = ui.IntField(width=40)
-                        self._goto_year.model.set_value(self._get_safe_current_time().year)
+                        self._goto_year.model.set_value(self._controller.get_start_time().year)
                         ui.Label("/", width=10)
                         self._goto_month = ui.IntField(width=30)
-                        self._goto_month.model.set_value(self._get_safe_current_time().month)
+                        self._goto_month.model.set_value(self._controller.get_start_time().month)
                         ui.Label("/", width=10)
                         self._goto_day = ui.IntField(width=30)
-                        self._goto_day.model.set_value(self._get_safe_current_time().day)
+                        self._goto_day.model.set_value(self._controller.get_start_time().day)
                         ui.Label(" ", width=10)
                         self._goto_hour = ui.IntField(width=30)
-                        self._goto_hour.model.set_value(self._get_safe_current_time().hour)
+                        self._goto_hour.model.set_value(self._controller.get_start_time().hour)
                         ui.Label(":", width=10)
                         self._goto_minute = ui.IntField(width=30)
-                        self._goto_minute.model.set_value(self._get_safe_current_time().minute)
+                        self._goto_minute.model.set_value(self._controller.get_start_time().minute)
                         ui.Label(":", width=10)
                         self._goto_second = ui.IntField(width=30)
-                        self._goto_second.model.set_value(self._get_safe_current_time().second)
+                        self._goto_second.model.set_value(self._controller.get_start_time().second)
                         self._goto_button = ui.Button("Go", width=40)
                         self._goto_button.set_clicked_fn(lambda: self._on_goto_clicked())
-                        
                 # 3. 수평선 추가하여 섹션 구분
                 with ui.HStack(height=2):
                     ui.Spacer(width=10)
@@ -162,16 +123,16 @@ class TimeWindowUI:
                     ui.Spacer(width=10)
                     ui.Label("Speed:", width=40)
                     self._speed_field = ui.FloatField(width=40)
-                    self._speed_field.model.set_value(self._get_safe_playback_speed())
+                    self._speed_field.model.set_value(self._controller.get_playback_speed())
                     self._speed_field.model.add_end_edit_fn(self._on_speed_changed)
                 
-                # 수평선 추가하여 섹션 구분
+                # 3. 수평선 추가하여 섹션 구분
                 with ui.HStack(height=5):
                     ui.Spacer(width=10)
                     ui.Line(style_type_name_override="border_color", style={"color": 0xFF666666})
                     ui.Spacer(width=10)
                 
-                # 4. Selected Rack Info 섹션
+                # 4. Selected Rack Info 섹션 (중간에 배치)
                 with ui.HStack(height=20):
                     ui.Label("Selected Rack Info", style={"font_size": 18})
                     
@@ -180,7 +141,12 @@ class TimeWindowUI:
                     ui.Label("Rack Path:", width=80)
                     self._selected_rack_label = ui.Label("None", width=ui.Percent(100))
                     
-                # Aisle 데이터
+                    # # Sensor ID - 주석 처리된 부분 복원
+                    # with ui.HStack(height=25):
+                    #     ui.Label("Sensor ID:", width=80)
+                    #     self._sensor_id_label = ui.Label("None", width=ui.Percent(100))
+                    
+                    # Aisle 데이터를 가로 배치로 변경하여 공간 절약
                 with ui.HStack(height=30, spacing=10):
                     # Cold Aisle
                     with ui.CollapsableFrame("Cold Aisle", height=70, width=50):
@@ -208,7 +174,7 @@ class TimeWindowUI:
                                 self._hot_humidity_label = ui.Label("N/A", width=50)
                                 ui.Label("%", width=30)
                 
-                # 수평선 추가하여 섹션 구분
+                # 5. 수평선 추가하여 섹션 구분
                 with ui.HStack(height=2):
                     ui.Spacer(width=10)
                     ui.Line(style_type_name_override="border_color", style={"color": 0xFF666666})
@@ -216,264 +182,168 @@ class TimeWindowUI:
                 
                 # 6. 하단 섹션: 슬라이더
                 with ui.HStack(height=30):
+                    # 양쪽 여백
                     ui.Spacer(width=10)
+                    
+                    # 슬라이더
                     self._time_slider = ui.FloatSlider(min=0.0, max=1.0, width=480)
-                    self._time_slider.model.set_value(self._get_safe_time_progress())
+                    self._time_slider.model.set_value(self._controller.get_progress())
                     self._time_slider.model.add_value_changed_fn(self._on_slider_changed)
+                    
+                    # 오른쪽 여백
                     ui.Spacer(width=20)
                 
-                # 7. 데이터 요약
+                # 7. 데이터 요약 - 슬라이더 아래에 배치
                 with ui.HStack(height=10):
                     ui.Spacer(width=10)
                     ui.Label("Racks Mapped:", width=90)
-                    self._rack_count_label = ui.Label(f"{self._get_rack_count()}", width=40)
+                    self._rack_count_label = ui.Label(f"{self._controller.get_rack_count()}", width=40)
                     ui.Spacer(width=20)
                     ui.Label("Number of sensors:", width=120)
-                    self._sensor_count_label = ui.Label(f"{self._get_sensor_count()}", width=40)
+                    self._sensor_count_label = ui.Label(f"{self._controller.get_sensor_count()}", width=40)
                     ui.Spacer(width=10)
     
-    # 안전한 데이터 접근 메서드들
-    def _get_safe_start_time(self):
-        """안전한 시작 시간 반환"""
-        try:
-            return self._controller.get_start_time()
-        except:
-            return datetime.datetime(2025, 5, 22, 0, 0, 0)
+    def _setup_selection_listener(self):
+        """선택 이벤트 리스너 설정"""
+        # Omniverse 2023 버전 이상에서는 스테이지 이벤트를 사용
+        import omni.usd
+        import carb
+        
+        # 기존 구독 정리
+        if self._selection_changed_sub:
+            self._selection_changed_sub = None
+        
+        # 스테이지 리스너 설정
+        events = self._usd_context.get_stage_event_stream()
+        self._selection_changed_sub = events.create_subscription_to_pop(
+            self._handle_stage_event, name="selection_changed_sub"
+        )
     
-    def _get_safe_end_time(self):
-        """안전한 종료 시간 반환"""
-        try:
-            return self._controller.get_end_time()
-        except:
-            return datetime.datetime(2025, 5, 31, 23, 59, 59)
+    def _handle_stage_event(self, event):
+        """스테이지 이벤트 핸들러"""
+        # 선택 변경 이벤트 필터링
+        import omni.usd
+        if event.type == int(omni.usd.StageEventType.SELECTION_CHANGED):
+            self._check_selected_prim()
     
-    def _get_safe_current_time(self):
-        """안전한 현재 시간 반환"""
-        try:
-            return self._controller.get_current_time()
-        except:
-            return datetime.datetime.now()
-    
-    def _get_safe_playback_speed(self):
-        """안전한 재생 속도 반환"""
-        try:
-            return self._controller._playback_speed
-        except:
-            return 1.0
-    
-    def _get_safe_time_progress(self):
-        """안전한 시간 진행률 반환"""
-        try:
-            return self._controller.get_time_progress()
-        except:
-            return 0.0
-    
-    def _get_rack_count(self):
-        """매핑된 랙 개수 반환"""
-        try:
-            if hasattr(self._controller, '_rack_to_sensor_map'):
-                return len(self._controller._rack_to_sensor_map)
-            return 0
-        except Exception as e:
-            print(f"[netai.timetravel.demo] Error getting rack count: {e}")
-            return 0
-    
-    def _get_sensor_count(self):
-        """활성 센서 개수 반환"""
-        try:
-            if hasattr(self._controller, '_data_cache') and self._controller._data_cache:
-                sensor_ids = self._controller._data_cache.get_sensor_ids()
-                return len(sensor_ids)
-            return 0
-        except Exception as e:
-            print(f"[netai.timetravel.demo] Error getting sensor count: {e}")
-            return 0
+    def _check_selected_prim(self):
+        """현재 선택된 프림 확인"""
+        import omni.usd
+        stage = self._usd_context.get_stage()
+        if not stage:
+            return
+            
+        # 현재 선택된 프림 경로 가져오기
+        selection = self._usd_context.get_selection()
+        selected_paths = selection.get_selected_prim_paths()
+        
+        if selected_paths:
+            # 첫 번째 선택된 프림 경로 사용
+            selected_path = selected_paths[0]
+            
+            # 디버깅용 로그 추가
+            print(f"[netai.timetravel.demo] 선택된 프림 경로: {selected_path}")
+            
+            # 랙 경로인지 확인 (간단한 체크: datacenter와 RACK이 포함되어 있는지)
+            if "datacenter" in selected_path and "RACK" in selected_path:
+                self._selected_rack_path = selected_path
+                
+                # 컨트롤러에서 랙에 매핑된 센서 ID 가져오기
+                sensor_id = self._controller.get_sensor_id_for_rack(selected_path)
+                
+                # 디버깅 로그 추가
+                print(f"[netai.timetravel.demo] 선택된 랙: {selected_path}, 매핑된 센서 ID: {sensor_id}")
+                
+                # 정확히 매핑된 센서 ID가 없으면 경로 변형 시도
+                if not sensor_id:
+                    # 1. "/World" 접두사 제거 시도
+                    if selected_path.startswith("/World"):
+                        alt_path = selected_path[6:]  # "/World" 제거
+                        sensor_id = self._controller.get_sensor_id_for_rack(alt_path)
+                        print(f"[netai.timetravel.demo] 대체 경로 시도 1: {alt_path}, 결과: {sensor_id}")
+                    
+                    # 2. "/World" 접두사 추가 시도
+                    if not sensor_id and not selected_path.startswith("/World"):
+                        alt_path = "/World" + selected_path
+                        sensor_id = self._controller.get_sensor_id_for_rack(alt_path)
+                        print(f"[netai.timetravel.demo] 대체 경로 시도 2: {alt_path}, 결과: {sensor_id}")
+                    
+                    # 3. 경로 끝부분만 사용 시도
+                    if not sensor_id:
+                        path_parts = selected_path.split('/')
+                        if len(path_parts) >= 2:
+                            rack_name = path_parts[-1]
+                            # 매핑에서 이 랙 이름을 포함하는 모든 경로 찾기
+                            for rack_path in self._controller._rack_to_sensor_map.keys():
+                                if rack_path.endswith('/' + rack_name):
+                                    sensor_id = self._controller.get_sensor_id_for_rack(rack_path)
+                                    print(f"[netai.timetravel.demo] 대체 경로 시도 3: {rack_path}, 결과: {sensor_id}")
+                                    if sensor_id:
+                                        break
+                
+                # UI 업데이트
+                self._selected_rack_label.text = self._get_rack_name(selected_path)
+                # self._sensor_id_label.text = sensor_id if sensor_id else "None (No matching sensor)"
+                
+                # 현재 시간의 센서 데이터 가져오기
+                self._update_selected_rack_data()
+            else:
+                # 랙이 아닌 경우 선택 정보 초기화
+                self._selected_rack_path = None
+                self._selected_rack_label.text = "None (Not a Rack)"
+                # self._sensor_id_label.text = "None"
+                self._clear_sensor_data_display()
     
     def _get_rack_name(self, rack_path):
         """랙 경로에서 랙 이름 추출"""
         if rack_path:
+            # 마지막 경로 부분 추출 (예: /Root/datacenter/RACK_A1 -> RACK_A1)
             parts = rack_path.split('/')
-            for part in reversed(parts):
-                if 'RACK' in part:
-                    return part
             return parts[-1] if parts else "Unknown"
         return "None"
     
-    def _setup_selection_listener(self):
-        """선택 이벤트 리스너 설정"""
-        try:
-            if self._usd_context:
-                events = self._usd_context.get_stage_event_stream()
-                self._selection_changed_sub = events.create_subscription_to_pop(
-                    self._handle_stage_event, name="selection_changed_sub"
-                )
-        except Exception as e:
-            print(f"[netai.timetravel.demo] Error setting up selection listener: {e}")
-    
-    def _handle_stage_event(self, event):
-        """스테이지 이벤트 핸들러"""
-        try:
-            import omni.usd
-            if event.type == int(omni.usd.StageEventType.SELECTION_CHANGED):
-                self._check_selected_prim()
-        except Exception as e:
-            print(f"[netai.timetravel.demo] Error handling stage event: {e}")
-    
-    def _check_selected_prim(self):
-        """현재 선택된 프림 확인"""
-        try:
-            if not self._usd_context:
-                return
-                
-            stage = self._usd_context.get_stage()
-            if not stage:
-                return
-            
-            # UI가 완전히 초기화되었는지 확인
-            if not self._selected_rack_label or not self._cold_temp_label:
-                return
-                
-            # 현재 선택된 프림 경로 가져오기
-            selection = self._usd_context.get_selection()
-            selected_paths = selection.get_selected_prim_paths()
-            
-            if selected_paths:
-                selected_path = selected_paths[0]
-                print(f"[netai.timetravel.demo] 선택된 프림 경로: {selected_path}")
-                
-                # 랙 경로인지 확인
-                if "datacenter" in selected_path and "RACK" in selected_path:
-                    self._handle_rack_selection(selected_path)
-                else:
-                    self._clear_rack_selection("None (Not a Rack)")
-            else:
-                self._clear_rack_selection("None")
-                
-        except Exception as e:
-            print(f"[netai.timetravel.demo] Error in _check_selected_prim: {e}")
-    
-    def _handle_rack_selection(self, selected_path):
-        """랙 선택 처리"""
-        try:
-            if not hasattr(self._controller, '_rack_to_sensor_map'):
-                self._clear_rack_selection("Controller not ready")
-                return
-                
-            rack_mapping = self._controller._rack_to_sensor_map
-            
-            # 정확한 경로 매칭
-            if selected_path in rack_mapping:
-                self._selected_rack_path = selected_path
-                print(f"[netai.timetravel.demo] 정확한 매칭 성공: {selected_path}")
-            else:
-                # 부분 매칭 시도
-                matched_path = self._find_matching_rack_path(selected_path, rack_mapping)
-                if matched_path:
-                    self._selected_rack_path = matched_path
-                    print(f"[netai.timetravel.demo] 부분 매칭 성공: {selected_path} -> {matched_path}")
-                else:
-                    self._selected_rack_path = None
-                    print(f"[netai.timetravel.demo] 매핑되지 않은 랙: {selected_path}")
-            
-            # UI 업데이트
-            self._update_rack_label(selected_path, rack_mapping)
-            self._update_selected_rack_data()
-            
-        except Exception as e:
-            print(f"[netai.timetravel.demo] Error handling rack selection: {e}")
-            self._clear_rack_selection("Error")
-    
-    def _find_matching_rack_path(self, selected_path, rack_mapping):
-        """매칭되는 랙 경로 찾기"""
-        try:
-            # 선택된 경로에서 랙 이름 추출
-            path_parts = selected_path.split('/')
-            selected_rack_name = None
-            
-            for part in reversed(path_parts):
-                if 'RACK' in part:
-                    selected_rack_name = part
-                    break
-            
-            if selected_rack_name:
-                # 매핑에서 같은 랙 이름을 가진 경로 찾기
-                for rack_path in rack_mapping.keys():
-                    if rack_path.endswith(selected_rack_name) or selected_rack_name in rack_path:
-                        return rack_path
-            
-            return None
-        except Exception as e:
-            print(f"[netai.timetravel.demo] Error finding matching rack path: {e}")
-            return None
-    
-    def _update_rack_label(self, selected_path, rack_mapping):
-        """랙 레이블 업데이트"""
-        try:
-            if self._selected_rack_path:
-                rack_name = self._get_rack_name(self._selected_rack_path)
-                sensor_id = rack_mapping.get(self._selected_rack_path, "Unknown")
-                self._selected_rack_label.text = f"{rack_name} (ID: {sensor_id})"
-            else:
-                self._selected_rack_label.text = f"{self._get_rack_name(selected_path)} (Not Mapped)"
-        except Exception as e:
-            print(f"[netai.timetravel.demo] Error updating rack label: {e}")
-    
-    def _clear_rack_selection(self, message="None"):
-        """랙 선택 초기화"""
-        try:
-            self._selected_rack_path = None
-            if self._selected_rack_label:
-                self._selected_rack_label.text = message
-            self._clear_sensor_data_display()
-        except Exception as e:
-            print(f"[netai.timetravel.demo] Error clearing rack selection: {e}")
-    
     def _update_selected_rack_data(self):
         """선택된 랙의 센서 데이터 업데이트"""
-        try:
-            # UI 요소들이 존재하는지 확인
-            if not all([self._cold_temp_label, self._hot_temp_label, 
-                       self._cold_humidity_label, self._hot_humidity_label]):
-                return
-                
-            if self._selected_rack_path:
-                # optimized_controller에서 데이터 가져오기
-                data = self._controller.get_rack_data_at_time(self._selected_rack_path)
-                
-                if data:
+        if self._selected_rack_path:
+            # USD 스테이지에서 데이터 직접 읽기
+            stage = self._usd_context.get_stage()
+            if stage:
+                prim = stage.GetPrimAtPath(self._selected_rack_path)
+                if prim and prim.IsValid():
+                    # 온도 및 습도 데이터 읽기
+                    temp_cold = prim.GetAttribute("temperature_cold").Get() if prim.HasAttribute("temperature_cold") else None
+                    temp_hot = prim.GetAttribute("temperature_hot").Get() if prim.HasAttribute("temperature_hot") else None
+                    hum_cold = prim.GetAttribute("humidity_cold").Get() if prim.HasAttribute("humidity_cold") else None
+                    hum_hot = prim.GetAttribute("humidity_hot").Get() if prim.HasAttribute("humidity_hot") else None
+                    
                     # UI 업데이트
-                    self._cold_temp_label.text = f"{data['temperature_cold']:.2f}"
-                    self._hot_temp_label.text = f"{data['temperature_hot']:.2f}"
-                    self._cold_humidity_label.text = f"{data['humidity_cold']:.2f}"
-                    self._hot_humidity_label.text = f"{data['humidity_hot']:.2f}"
+                    self._cold_temp_label.text = f"{temp_cold:.2f}" if temp_cold is not None else "N/A"
+                    self._hot_temp_label.text = f"{temp_hot:.2f}" if temp_hot is not None else "N/A"
+                    self._cold_humidity_label.text = f"{hum_cold:.2f}" if hum_cold is not None else "N/A"
+                    self._hot_humidity_label.text = f"{hum_hot:.2f}" if hum_hot is not None else "N/A"
                     return
-                else:
-                    print(f"[netai.timetravel.demo] 데이터 없음: {self._selected_rack_path}")
-            
-            # 데이터가 없는 경우 초기화
-            self._clear_sensor_data_display()
-            
-        except Exception as e:
-            print(f"[netai.timetravel.demo] Error updating selected rack data: {e}")
-            self._clear_sensor_data_display()
+        
+        # 선택된 랙이 없거나 데이터를 찾을 수 없는 경우 UI 초기화
+        self._clear_sensor_data_display()
     
     def _clear_sensor_data_display(self):
         """센서 데이터 표시 초기화"""
-        try:
-            if self._cold_temp_label:
-                self._cold_temp_label.text = "N/A"
-            if self._hot_temp_label:
-                self._hot_temp_label.text = "N/A"
-            if self._cold_humidity_label:
-                self._cold_humidity_label.text = "N/A"
-            if self._hot_humidity_label:
-                self._hot_humidity_label.text = "N/A"
-        except Exception as e:
-            print(f"[netai.timetravel.demo] Error clearing sensor data display: {e}")
+        self._cold_temp_label.text = "N/A"
+        self._hot_temp_label.text = "N/A"
+        self._cold_humidity_label.text = "N/A"
+        self._hot_humidity_label.text = "N/A"
     
-    # 이벤트 핸들러들
+    def destroy(self):
+        """Clean up UI"""
+        if self._selection_changed_sub:
+            self._selection_changed_sub = None
+        
+        if self._window:
+            self._window = None
+    
     def _on_apply_clicked(self):
         """Apply button click handler"""
+        # Get values from UI
         try:
             start_time = datetime.datetime(
                 self._start_year.model.get_value_as_int(),
@@ -493,10 +363,12 @@ class TimeWindowUI:
                 self._end_second.model.get_value_as_int()
             )
             
+            # Check that end time is after start time
             if end_time <= start_time:
                 print("[netai.timetravel.demo] Error: End time must be after start time")
                 return
             
+            # Apply new time range
             self._controller.set_time_range(start_time, end_time)
             
         except Exception as e:
@@ -505,6 +377,7 @@ class TimeWindowUI:
     def _on_goto_clicked(self):
         """Go to specific time handler"""
         try:
+            # 년/월/일/시/분/초 모두 사용하여 새 시간 생성
             goto_time = datetime.datetime(
                 self._goto_year.model.get_value_as_int(),
                 self._goto_month.model.get_value_as_int(),
@@ -514,105 +387,73 @@ class TimeWindowUI:
                 self._goto_second.model.get_value_as_int()
             )
             
-            # 시간 범위 검증
+            # 시간 범위 내에 있는지 확인
             start_time = self._controller.get_start_time()
             end_time = self._controller.get_end_time()
             
+            # 시간 범위 체크
             if goto_time < start_time:
+                print("[netai.timetravel.demo] Error: Time is before start range")
                 goto_time = start_time
             elif goto_time > end_time:
+                print("[netai.timetravel.demo] Error: Time is after end range")
                 goto_time = end_time
             
-            self._controller._current_time = goto_time
-            self._controller.update_stage_time()
+            # 컨트롤러에 시간 설정
+            self._controller.set_current_time(goto_time)
             
-            if self._time_slider:
-                self._time_slider.model.set_value(self._controller.get_time_progress())
+            # 슬라이더 업데이트
+            self._time_slider.model.set_value(self._controller.get_progress())
             
         except Exception as e:
             print(f"[netai.timetravel.demo] Error setting specific time: {e}")
     
     def _on_present_clicked(self):
         """Present button click handler"""
-        try:
-            self._controller.set_time_progress(1.0)
-            if self._time_slider:
-                self._time_slider.model.set_value(1.0)
-        except Exception as e:
-            print(f"[netai.timetravel.demo] Error in _on_present_clicked: {e}")
+        self._controller.set_to_present()
+        self._time_slider.model.set_value(1.0)
     
     def _on_play_clicked(self):
         """Play button click handler"""
-        try:
-            self._controller.toggle_playback()
-            if self._play_button:
-                if self._controller.is_playing():
-                    self._play_button.text = "Pause"
-                else:
-                    self._play_button.text = "Play"
-        except Exception as e:
-            print(f"[netai.timetravel.demo] Error in _on_play_clicked: {e}")
+        self._controller.toggle_playback()
+        if self._controller.is_playing():
+            self._play_button.text = "Pause"
+        else:
+            self._play_button.text = "Play"
     
     def _on_slider_changed(self, model):
         """Slider value change handler"""
-        try:
-            if not self._controller.is_playing():
-                progress = model.get_value_as_float()
-                self._controller.set_time_progress(progress)
-        except Exception as e:
-            print(f"[netai.timetravel.demo] Error in _on_slider_changed: {e}")
+        if not self._controller.is_playing():  # Only update when not playing
+            progress = model.get_value_as_float()
+            self._controller.set_progress(progress)
     
     def _on_speed_changed(self, model):
         """Speed value change handler"""
-        try:
-            speed = model.get_value_as_float()
-            if speed <= 0:
-                speed = 0.1
-            self._controller.set_playback_speed(speed)
-        except Exception as e:
-            print(f"[netai.timetravel.demo] Error in _on_speed_changed: {e}")
+        speed = model.get_value_as_float()
+        if speed <= 0:
+            speed = 0.1
+        self._controller.set_playback_speed(speed)
     
     def update_ui(self):
         """Update UI elements"""
-        try:
-            # Update stage time display
-            current_time = self._controller.get_current_time()
-            if current_time and self._stage_time_label:
-                self._stage_time_label.text = current_time.strftime("%Y-%m-%d %H:%M:%S")
-            elif self._stage_time_label:
-                self._stage_time_label.text = "No data loaded"
+        # Update stage time display
+        stage_time = self._controller.get_stage_time()
+        self._stage_time_label.text = stage_time
+        
+        # Update time slider when playing
+        if self._controller.is_playing():
+            self._time_slider.model.set_value(self._controller.get_progress())
+        
+        # Update play button text
+        if self._controller.is_playing():
+            self._play_button.text = "Pause"
+        else:
+            self._play_button.text = "Play"
             
-            # Update time slider when playing
-            if self._time_slider and self._controller.is_playing():
-                self._time_slider.model.set_value(self._controller.get_time_progress())
-            
-            # Update play button text
-            if self._play_button:
-                if self._controller.is_playing():
-                    self._play_button.text = "Pause"
-                else:
-                    self._play_button.text = "Play"
-                    
-            # Update rack data if a rack is selected
-            if self._selected_rack_path:
-                self._update_selected_rack_data()
-            
-            # Update rack and sensor counts
-            if self._rack_count_label:
-                self._rack_count_label.text = f"{self._get_rack_count()}"
-            if self._sensor_count_label:
-                self._sensor_count_label.text = f"{self._get_sensor_count()}"
-                
-        except Exception as e:
-            print(f"[netai.timetravel.demo] Error updating UI: {e}")
-    
-    def destroy(self):
-        """Clean up UI"""
-        try:
-            if self._selection_changed_sub:
-                self._selection_changed_sub = None
-            
-            if self._window:
-                self._window = None
-        except Exception as e:
-            print(f"[netai.timetravel.demo] Error in destroy: {e}")
+        # Update rack data if a rack is selected
+        if self._selected_rack_path:
+            self._update_selected_rack_data()
+        
+        # Update rack and sensor counts
+        self._rack_count_label.text = f"{self._controller.get_rack_count()}"
+        self._sensor_count_label.text = f"{self._controller.get_sensor_count()}"

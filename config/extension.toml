@@ -6,8 +6,8 @@ version = "1.0.0"
 authors = ["NVIDIA"]
 
 # The title and description fields are primarily for displaying extension info in UI
-title = "netai timetravel demo"
-description="A simple python extension example to use as a starting point for your extensions."
+title = "NetAI Time Travel Demo"
+description = "Time travel demo for datacenter digital twin"
 
 # Path (relative to the root) or content of readme markdown file for UI.
 readme  = "docs/README.md"
@@ -35,6 +35,19 @@ icon = "data/icon.png"
 # Use omni.ui to build simple UI
 [dependencies]
 "omni.kit.uiapp" = {}
+"omni.usd" = {}
+"omni.ui" = {}
+
+# Python dependencies
+[python.pip_archive]
+"pyarrow" = "*"
+"minio" = "*"
+"requests" = "*"
+
+# 또는 특정 버전 지정
+# [python.pip_archive] 
+# "pyarrow" = ">=12.0.0"
+# "minio" = ">=7.0.0"
 
 # Main python module this extension provides, it will be publicly available as "import netai.timetravel.demo".
 [[python.module]]

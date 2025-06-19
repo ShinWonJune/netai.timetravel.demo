@@ -1,93 +1,90 @@
-# -*- coding: utf-8 -*-
 """
-Configuration and sensor-rack mapping for Time Travel extension
+Time Travel Demo Extension Configuration
+데이터센터 랙과 센서 ID 매핑 설정
 """
-from typing import Dict, List, Optional
-from dataclasses import dataclass
 
-@dataclass
-class ConfigSettings:
-    """Configuration settings for the extension"""
-    DEFAULT_TIME_RANGE_DAYS: int = 7
-    DEFAULT_PLAYBACK_SPEED: float = 1.0
-    MIN_PLAYBACK_SPEED: float = 0.1
-    MAX_PLAYBACK_SPEED: float = 10.0
+# 랙-센서 매핑 정보
+RACK_SENSOR_MAPPING = {
+    # A 구역 랙들
+    "/datacenter/RACK_A1": "20",
+    "/datacenter/RACK_A3": "21", 
+    "/datacenter/RACK_A5": "22",
+    "/datacenter/RACK_A7": "23",
+    "/datacenter/RACK_A10": "24",
+    "/datacenter/RACK_A12": "25",
     
-    # MinIO configuration
-    MINIO_ENDPOINT: str = "10.79.1.0:9000"
-    MINIO_BUCKET: str = "fms-temphum"
-    MINIO_PREFIX: str = "2025-05/"
+    # B 구역 랙들
+    "/datacenter/RACK_B1": "191",
+    "/datacenter/RACK_B3": "192",
+    "/datacenter/RACK_B5": "193",
+    "/datacenter/RACK_B10": "194",
+    "/datacenter/RACK_B12": "195", 
+    "/datacenter/RACK_B14": "196",
     
-    # Local fallback path
-    LOCAL_DATA_PATH: str = "data/"
+    # A0, A2, A4, A6, A8, A9 구역 랙들 (01)
+    "/datacenter/RACK_A0_01": "203",
+    "/datacenter/RACK_A2_01": "204",
+    "/datacenter/RACK_A4_01": "205",
+    "/datacenter/RACK_A6_01": "206",
+    "/datacenter/RACK_A8_01": "207",
+    "/datacenter/RACK_A9_01": "208",
     
-class Config:
-    """Main configuration class"""
-    
-    # Instance of settings
-    _settings = ConfigSettings()
-    
-    # Make settings accessible as class attributes
-    DEFAULT_TIME_RANGE_DAYS = _settings.DEFAULT_TIME_RANGE_DAYS
-    DEFAULT_PLAYBACK_SPEED = _settings.DEFAULT_PLAYBACK_SPEED
-    MIN_PLAYBACK_SPEED = _settings.MIN_PLAYBACK_SPEED
-    MAX_PLAYBACK_SPEED = _settings.MAX_PLAYBACK_SPEED
-    MINIO_ENDPOINT = _settings.MINIO_ENDPOINT
-    MINIO_BUCKET = _settings.MINIO_BUCKET
-    MINIO_PREFIX = _settings.MINIO_PREFIX
-    LOCAL_DATA_PATH = _settings.LOCAL_DATA_PATH
-    
-    @classmethod
-    def get_rack_to_sensor_map(cls) -> Dict[str, int]:
-        """Get mapping from rack paths to objId (직접 매핑)"""
-        return {
-            # A 구역 랙들
-            "/datacenter/RACK_A1": 20,
-            "/datacenter/RACK_A3": 21, 
-            "/datacenter/RACK_A5": 22,
-            "/datacenter/RACK_A7": 23,
-            "/datacenter/RACK_A10": 24,
-            "/datacenter/RACK_A12": 25,
-            
-            # B 구역 랙들
-            "/datacenter/RACK_B1": 191,
-            "/datacenter/RACK_B3": 192,
-            "/datacenter/RACK_B5": 193,
-            "/datacenter/RACK_B10": 194,
-            "/datacenter/RACK_B12": 195, 
-            "/datacenter/RACK_B14": 196,
-            
-            # A0, A2, A4, A6, A8, A9 구역 랙들 (01)
-            "/datacenter/RACK_A0_01": 203,
-            "/datacenter/RACK_A2_01": 204,
-            "/datacenter/RACK_A4_01": 205,
-            "/datacenter/RACK_A6_01": 206,
-            "/datacenter/RACK_A8_01": 207,
-            "/datacenter/RACK_A9_01": 208,
-            
-            # A0, A2, A4, A6, A8, A9 구역 랙들 (02)
-            "/datacenter/RACK_A0_02": 197,
-            "/datacenter/RACK_A2_02": 198,
-            "/datacenter/RACK_A4_02": 199,
-            "/datacenter/RACK_A6_02": 200,
-            "/datacenter/RACK_A8_02": 201,
-            "/datacenter/RACK_A9_02": 202,
-        }
-    
-    @classmethod
-    def get_sensor_to_rack_map(cls) -> Dict[int, str]:
-        """Get mapping from objId to rack paths (직접 매핑)"""
-        rack_to_sensor = cls.get_rack_to_sensor_map()
-        return {objid: rack_path for rack_path, objid in rack_to_sensor.items()}
+    # A0, A2, A4, A6, A8, A9 구역 랙들 (02)
+    "/datacenter/RACK_A0_02": "197",
+    "/datacenter/RACK_A2_02": "198",
+    "/datacenter/RACK_A4_02": "199",
+    "/datacenter/RACK_A6_02": "200",
+    "/datacenter/RACK_A8_02": "201",
+    "/datacenter/RACK_A9_02": "202",
+}
 
-# Parquet file column mapping
-PARQUET_COLUMN_MAPPING = {
-    'timestamp': '@timestamp',
-    'timestamp_utc': '@timestamp_utc', 
-    'objid': 'objId',
-    'temperature_cold': 'TEMPERATURE1',
-    'temperature_hot': 'TEMPERATURE',
-    'humidity_cold': 'HUMIDITY1',
-    'humidity_hot': 'HUMIDITY',
-    'rsctypeid': 'rsctypeId'
+# 정의된 랙 경로 목록 (매핑에서 키 값들과 동일)
+PREDEFINED_RACK_PATHS = list(RACK_SENSOR_MAPPING.keys())
+
+# USD 스테이지에서 가능한 경로 접두사들 (우선순위 순)
+POSSIBLE_PATH_PREFIXES = [
+    "",  # 기본 경로 (접두사 없음)
+    "/Root",  # /Root 접두사
+    "/World/Root",  # /World/Root 접두사
+]
+
+# 센서 데이터 파일 설정
+SENSOR_DATA_CONFIG = {
+    "csv_file": "fms_temphum_0327.csv",
+    "timestamp_column": "@timestamp",
+    "obj_id_column": "objId",
+    "temperature_columns": {
+        "cold": "TEMPERATURE1",
+        "hot": "TEMPERATURE"
+    },
+    "humidity_columns": {
+        "cold": "HUMIDITY1", 
+        "hot": "HUMIDITY"
+    }
+}
+
+# USD 속성 설정
+USD_ATTRIBUTE_CONFIG = {
+    "time_manager_path": "/World/TimeManager",
+    "rack_attributes": {
+        "temperature_cold": "temperature_cold",
+        "temperature_hot": "temperature_hot", 
+        "humidity_cold": "humidity_cold",
+        "humidity_hot": "humidity_hot"
+    },
+    "metadata_keys": [
+        "temperature_cold", "temperature_hot",
+        "humidity_cold", "humidity_hot", 
+        "timestamp", "sensor_id", "data_source"
+    ]
+}
+
+# 로그 설정
+LOG_PREFIX = "[netai.timetravel.demo]"
+
+# 기본 시간 설정
+DEFAULT_TIME_CONFIG = {
+    "base_time": "2025-01-01T00:00:00.00Z",
+    "default_start": "2025-03-26T00:00:00",
+    "default_end": "2025-03-27T00:00:00"
 }

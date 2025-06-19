@@ -1,0 +1,34 @@
+# 랙 경로와 센서 ID 매핑
+# 형식: 랙_경로 센서ID
+
+# A 구역 랙들
+/datacenter/RACK_A1 20
+/datacenter/RACK_A3 21
+/datacenter/RACK_A5 22
+/datacenter/RACK_A7 23
+/datacenter/RACK_A10 24
+/datacenter/RACK_A12 25
+
+# B 구역 랙들
+/datacenter/RACK_B1 191
+/datacenter/RACK_B3 192
+/datacenter/RACK_B5 193
+/datacenter/RACK_B10 194
+/datacenter/RACK_B12 195
+/datacenter/RACK_B14 196
+
+# A0, A2, A4, A6, A8, A9 구역 랙들 (01)
+/datacenter/RACK_A0_01 203
+/datacenter/RACK_A2_01 204
+/datacenter/RACK_A4_01 205
+/datacenter/RACK_A6_01 206
+/datacenter/RACK_A8_01 207
+/datacenter/RACK_A9_01 208
+
+# A0, A2, A4, A6, A8, A9 구역 랙들 (02)
+/datacenter/RACK_A0_02 197
+/datacenter/RACK_A2_02 198
+/datacenter/RACK_A4_02 199
+/datacenter/RACK_A6_02 200
+/datacenter/RACK_A8_02 201
+/datacenter/RACK_A9_02 202
