@@ -139,7 +139,7 @@ class TimeWindowUI:
                 # Rack Path
                 with ui.HStack(height=20):
                     ui.Label("Rack Path:", width=80)
-                    self._selected_rack_label = ui.Label("None", width=ui.Percent(100))
+                    # self._selected_rack_label = ui.Label("None", width=ui.Percent(100))
                     
                     # # Sensor ID - 주석 처리된 부분 복원
                     # with ui.HStack(height=25):
@@ -282,7 +282,7 @@ class TimeWindowUI:
                                         break
                 
                 # UI 업데이트
-                self._selected_rack_label.text = self._get_rack_name(selected_path)
+                # self._selected_rack_label.text = self._get_rack_name(selected_path)
                 # self._sensor_id_label.text = sensor_id if sensor_id else "None (No matching sensor)"
                 
                 # 현재 시간의 센서 데이터 가져오기
@@ -290,7 +290,7 @@ class TimeWindowUI:
             else:
                 # 랙이 아닌 경우 선택 정보 초기화
                 self._selected_rack_path = None
-                self._selected_rack_label.text = "None (Not a Rack)"
+                # self._selected_rack_label.text = "None (Not a Rack)"
                 # self._sensor_id_label.text = "None"
                 self._clear_sensor_data_display()
     

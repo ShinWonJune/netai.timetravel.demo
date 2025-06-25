@@ -7,8 +7,9 @@ import os
 import csv
 from datetime import datetime as dt
 import random
+
 '''
-timestamp의 데이터만 표현하고 이외에는 nan으로 표현
+정확한 timestamp 매칭 + last known value 방식으로 센서 데이터 업데이트
 '''
 # Config import
 from .config import (
@@ -42,11 +43,19 @@ class TimeController:
         self._rack_paths = []
         self._rack_to_sensor_map = {}  # 랙 경로 -> 센서 ID 매핑
         self._load_rack_paths()
-        
+
+        # 고성능 사전 계산된 타임라인
+        self._second_timeline = {}  # 모든 초에 대해 사전 계산된 데이터
+
+
         # 센서 데이터 초기화
-        self._sensor_data = {}  # timestamp 기준으로 그룹화된 센서 데이터
+        self._sensor_data = {}  # 정규화된 timestamp 기준으로 그룹화된 센서 데이터
+        self._sorted_timestamps = []  # 정렬된 timestamp 목록
+        self._last_known_values = {}  # 각 랙의 마지막 알려진 값 저장
         self._load_sensor_data()
         
+
+
         # 센서 데이터 기반으로 시간 범위 초기화
         self._initialize_time_range()
         
@@ -62,7 +71,12 @@ class TimeController:
         self._update_stage_time()
         
         # 매핑된 랙 수 출력
-        print(f"{LOG_PREFIX} 초기화 완료. 매핑된 랙 수: {len(self._rack_to_sensor_map)}, 데이터가 있는 센서 수: {len(self._sensor_data)}")
+        unique_sensors = set()
+        if self._sensor_data:
+            for sensors in self._sensor_data.values():
+                unique_sensors.update(sensors.keys())
+        
+        print(f"{LOG_PREFIX} 초기화 완료. 매핑된 랙 수: {len(self._rack_to_sensor_map)}, 데이터가 있는 센서 수: {len(unique_sensors)}")
         
         # 디버깅: 매핑 상태 출력
         self._debug_mapping_status()
@@ -83,20 +97,16 @@ class TimeController:
         ]
         
         for pattern in rack_patterns:
-            # 패턴과 일치하는 모든 프림 찾기
             try:
-                # USD는 직접적인 글로브 패턴을 지원하지 않아 단순 방법으로 처리
-                base_path = pattern.split("RACK_")[0]  # "/Root/datacenter/" 또는 "/World/Root/datacenter/"
+                base_path = pattern.split("RACK_")[0]
                 
                 if not stage.GetPrimAtPath(base_path).IsValid():
-                    continue  # 기본 경로가 없으면 다음 패턴으로
+                    continue
                 
-                # 모든 자식 프림 탐색
                 datacenter_prim = stage.GetPrimAtPath(base_path)
                 if not datacenter_prim.IsValid():
                     continue
                 
-                # 모든 자식 프림 중 RACK_으로 시작하는 이름 찾기
                 initialized_count = 0
                 for child_prim in datacenter_prim.GetChildren():
                     child_name = child_prim.GetName()
@@ -132,12 +142,10 @@ class TimeController:
             
             for attr_name in temp_attrs:
                 if rack_prim.HasAttribute(attr_name):
-                    # 기존 속성이 있으면 초기화
                     rack_prim.CreateAttribute(attr_name, Sdf.ValueTypeNames.Float).Set(float('nan'))
             
             # 메타데이터 초기화
             metadata_keys = USD_ATTRIBUTE_CONFIG["metadata_keys"]
-            
             for key in metadata_keys:
                 rack_prim.SetCustomDataByKey(key, "N/A")
             
@@ -153,9 +161,7 @@ class TimeController:
             rack_dir_path = os.path.join(os.path.dirname(__file__), "rack_directory.txt")
             rack_map_path = os.path.join(os.path.dirname(__file__), "rack_sensor_map.txt")
             
-            # 경로 확인 로그
             print(f"{LOG_PREFIX} 랙 디렉토리 파일 경로: {rack_dir_path}")
-            print(f"{LOG_PREFIX} 현재 작업 디렉토리: {os.getcwd()}")
             
             if os.path.exists(rack_dir_path):
                 with open(rack_dir_path, 'r') as file:
@@ -163,33 +169,19 @@ class TimeController:
                     self._rack_paths = content.split()
                 
                 print(f"{LOG_PREFIX} 로드된 랙 수: {len(self._rack_paths)}")
-                if self._rack_paths:
-                    print(f"{LOG_PREFIX} 첫 번째 랙 경로 예시: {self._rack_paths[0]}")
                 
-                # USD 스테이지에서 실제 경로 확인
-                stage = self._usd_context.get_stage()
-                if stage:
-                    # 경로 중 하나가 실제로 존재하는지 확인
-                    for path in self._rack_paths[:5]:  # 처음 5개만 확인
-                        prim = stage.GetPrimAtPath(path)
-                        print(f"{LOG_PREFIX} 경로 확인: {path} - 존재: {prim.IsValid() if prim else False}")
-                
-                # 랙-센서 매핑 파일이 있는지 확인
+                # 랙-센서 매핑 파일 확인
                 if os.path.exists(rack_map_path):
                     self._load_rack_sensor_map(rack_map_path)
                 else:
                     print(f"{LOG_PREFIX} 랙-센서 매핑 파일이 없어 정의된 매핑을 생성합니다.")
-                    # 정의된 매핑 생성
                     self._create_predefined_mapping()
             else:
                 print(f"{LOG_PREFIX} 랙 디렉토리 파일을 찾을 수 없음: {rack_dir_path}")
-                
-                # 테스트용 랙 경로 생성
                 self._create_test_rack_paths()
+                
         except Exception as e:
             print(f"{LOG_PREFIX} 랙 경로 로드 오류: {e}")
-            
-            # 오류 발생 시 테스트 데이터 생성
             self._create_test_rack_paths()
     
     def _load_rack_sensor_map(self, map_file_path):
@@ -199,9 +191,8 @@ class TimeController:
                 for line in file:
                     line = line.strip()
                     if not line or line.startswith('#'):
-                        continue  # 빈 줄이나 주석 무시
+                        continue
                     
-                    # 형식: 랙_경로 센서ID
                     parts = line.split()
                     if len(parts) >= 2:
                         rack_path = parts[0]
@@ -211,62 +202,49 @@ class TimeController:
             print(f"{LOG_PREFIX} 랙-센서 매핑 파일 로드 완료. 매핑된 랙 수: {len(self._rack_to_sensor_map)}")
         except Exception as e:
             print(f"{LOG_PREFIX} 랙-센서 매핑 파일 로드 오류: {e}")
-            # 오류 시 정의된 매핑 생성
             self._create_predefined_mapping()
     
     def _create_test_rack_paths(self):
         """정의된 랙 경로를 기반으로 실제 랙 경로 찾기"""
         print(f"{LOG_PREFIX} 정의된 랙 경로 검색 중...")
         
-        # USD 스테이지에서 실제 존재하는 경로 찾기
         stage = self._usd_context.get_stage()
         real_paths = []
         
         if stage:
             for defined_path in PREDEFINED_RACK_PATHS:
-                # 가능한 경로 변형들
                 possible_paths = [prefix + defined_path for prefix in POSSIBLE_PATH_PREFIXES]
                 
-                # 각 경로 변형 시도
                 for path in possible_paths:
                     prim = stage.GetPrimAtPath(path)
                     if prim and prim.IsValid():
                         real_paths.append(path)
                         print(f"{LOG_PREFIX} 실제 랙 찾음: {path}")
-                        break  # 첫 번째로 찾은 유효한 경로만 사용
+                        break
             
             if real_paths:
                 self._rack_paths = real_paths
                 print(f"{LOG_PREFIX} 실제 랙 경로 {len(real_paths)}개 찾음")
             else:
-                # 실제 경로를 찾지 못했으면 기본 경로 사용
-                self._rack_paths = [POSSIBLE_PATH_PREFIXES[1] + path for path in PREDEFINED_RACK_PATHS]  # /Root 접두사 사용
+                self._rack_paths = [POSSIBLE_PATH_PREFIXES[1] + path for path in PREDEFINED_RACK_PATHS]
                 print(f"{LOG_PREFIX} 실제 랙 경로를 찾지 못해 기본 경로 사용")
         else:
-            # 스테이지가 없으면 기본 경로 사용
-            self._rack_paths = [POSSIBLE_PATH_PREFIXES[1] + path for path in PREDEFINED_RACK_PATHS]  # /Root 접두사 사용
+            self._rack_paths = [POSSIBLE_PATH_PREFIXES[1] + path for path in PREDEFINED_RACK_PATHS]
             print(f"{LOG_PREFIX} 스테이지 없음, 기본 랙 경로 사용")
             
-        # 정의된 매핑 생성
         self._create_predefined_mapping()
         
     def _create_predefined_mapping(self):
         """정의된 랙-센서 매핑 생성"""
-        # Config에서 정의된 랙-센서 매핑 사용
         predefined_mapping = RACK_SENSOR_MAPPING
-        
-        # 이전 매핑 초기화
         self._rack_to_sensor_map.clear()
         
-        # USD 스테이지에서 실제 존재하는 랙 경로 확인 및 매핑
         stage = self._usd_context.get_stage()
         mapped_count = 0
         
         for defined_path, sensor_id in predefined_mapping.items():
-            # 가능한 경로 변형들
             possible_paths = [prefix + defined_path for prefix in POSSIBLE_PATH_PREFIXES]
             
-            # 각 경로 변형 시도
             for path in possible_paths:
                 if stage:
                     prim = stage.GetPrimAtPath(path)
@@ -274,35 +252,14 @@ class TimeController:
                         self._rack_to_sensor_map[path] = sensor_id
                         mapped_count += 1
                         print(f"{LOG_PREFIX} 매핑 성공: {path} -> {sensor_id}")
-                        break  # 첫 번째로 찾은 유효한 경로만 사용
+                        break
                 else:
-                    # 스테이지가 없는 경우 모든 경로를 추가
                     self._rack_to_sensor_map[path] = sensor_id
                     mapped_count += 1
                     break
         
         print(f"{LOG_PREFIX} 정의된 랙-센서 매핑 생성 완료. 매핑된 랙 수: {mapped_count}")
         
-        # 센서 데이터가 있는 센서 ID와 매핑 비교
-        available_sensors = set()
-        for sensors_at_time in self._sensor_data.values():
-            available_sensors.update(sensors_at_time.keys())
-        mapped_sensors = set(self._rack_to_sensor_map.values())
-        
-        print(f"{LOG_PREFIX} 사용 가능한 센서 ID: {sorted(available_sensors)}")
-        print(f"{LOG_PREFIX} 매핑된 센서 ID: {sorted(mapped_sensors)}")
-        
-        # 매핑되었지만 데이터가 없는 센서
-        missing_data = mapped_sensors - available_sensors
-        if missing_data:
-            print(f"{LOG_PREFIX} 데이터가 없는 센서 ID: {sorted(missing_data)}")
-        
-        # 데이터는 있지만 매핑되지 않은 센서
-        unmapped_sensors = available_sensors - mapped_sensors
-        if unmapped_sensors:
-            print(f"{LOG_PREFIX} 매핑되지 않은 센서 ID: {sorted(unmapped_sensors)}")
-        
-        # 생성된 매핑을 파일로 저장
         if mapped_count > 0:
             self.save_rack_sensor_map()
                 
@@ -326,7 +283,7 @@ class TimeController:
             return False
     
     def _load_sensor_data(self):
-        """센서 데이터 CSV 파일 로드 - timestamp 기준으로 그룹화"""
+        """센서 데이터 CSV 파일 로드 - timestamp를 센티초 단위로 정규화"""
         try:
             csv_path = os.path.join(os.path.dirname(__file__), SENSOR_DATA_CONFIG["csv_file"])
             
@@ -334,14 +291,17 @@ class TimeController:
                 reader = csv.DictReader(file)
                 data_list = list(reader)
             
-            # timestamp 기준으로 데이터 그룹화
+            # timestamp 기준으로 데이터 그룹화 + 정규화
             for entry in data_list:
-                # 타임스탬프 가져오기
-                timestamp = entry.get(SENSOR_DATA_CONFIG["timestamp_column"])
-                if not timestamp:
-                    continue  # 타임스탬프가 없으면 건너뜀기
+                original_timestamp = entry.get(SENSOR_DATA_CONFIG["timestamp_column"])
+                if not original_timestamp:
+                    continue
                 
-                # objId 가져오기
+                # 🚀 핵심: timestamp를 센티초 단위로 정규화
+                normalized_timestamp = self._normalize_timestamp_to_seconds(original_timestamp)
+                if not normalized_timestamp:
+                    continue
+                
                 obj_id = entry.get(SENSOR_DATA_CONFIG["obj_id_column"], "unknown")
                 
                 # 숫자 형식으로 변환
@@ -353,14 +313,21 @@ class TimeController:
                         try:
                             entry[field] = float(entry[field])
                         except (ValueError, TypeError):
-                            entry[field] = 0.0  # 변환 실패 시 기본값
+                            entry[field] = 0.0
                 
-                # timestamp를 key로 사용하여 데이터 저장
-                if timestamp not in self._sensor_data:
-                    self._sensor_data[timestamp] = {}  # 해당 시간의 모든 센서 데이터
+                # 원본 timestamp도 보관 (디버깅용)
+                entry['original_timestamp'] = original_timestamp
+                entry['normalized_timestamp'] = normalized_timestamp
                 
-                # 해당 시간에 센서 ID별 데이터 저장
-                self._sensor_data[timestamp][obj_id] = entry
+                # 정규화된 timestamp를 key로 사용하여 데이터 저장
+                if normalized_timestamp not in self._sensor_data:
+                    self._sensor_data[normalized_timestamp] = {}
+                
+                self._sensor_data[normalized_timestamp][obj_id] = entry
+            
+            # 🚀 정규화된 timestamp 정렬
+            # self._sorted_timestamps = sorted(self._sensor_data.keys())
+            self._sorted_timestamps = list(self._sensor_data.keys())
             
             # 결과 요약
             total_timestamps = len(self._sensor_data)
@@ -369,31 +336,102 @@ class TimeController:
             for sensors in self._sensor_data.values():
                 unique_sensors.update(sensors.keys())
             
-            print(f"{LOG_PREFIX} 로드된 센서 데이터: {total_entries}개 데이터, {total_timestamps}개 타임스탬프, {len(unique_sensors)}개 센서")
+            print(f"{LOG_PREFIX} 로드된 센서 데이터: {total_entries}개 데이터, {total_timestamps}개 정규화된 타임스탬프, {len(unique_sensors)}개 센서")
             
-            # 센서 ID 목록 출력
-            sensor_ids = sorted(unique_sensors)
-            print(f"{LOG_PREFIX} 센서 ID: {', '.join(sensor_ids[:10])}{'...' if len(sensor_ids) > 10 else ''}")
+            if self._sorted_timestamps:
+                print(f"{LOG_PREFIX} 정규화된 시간 범위: {self._sorted_timestamps[0]} ~ {self._sorted_timestamps[-1]}")
             
-            # 시간 범위 출력
-            if self._sensor_data:
-                timestamps = sorted(self._sensor_data.keys())
-                print(f"{LOG_PREFIX} 시간 범위: {timestamps[0]} ~ {timestamps[-1]}")
+            # 🚀 핵심: 사전 계산 실행
+            self.precompute_second_timeline()
             
         except Exception as e:
             print(f"{LOG_PREFIX} 센서 데이터 로드 오류: {e}")
             self._sensor_data = {}
+            self._sorted_timestamps = []
     
+    def _normalize_timestamp_to_seconds(self, timestamp_str):
+        """타임스탬프를 센티초 단위로 정규화"""
+        try:
+            # 1. 원본 timestamp 파싱
+            dt = self._parse_timestamp(timestamp_str)
+            if not dt:
+                return None
+            
+            # 2. 센티초 단위로 변환 (마이크로초 뒤 4자리 제거)
+            # normalized = dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-4] + "Z"
+            normalized = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            return normalized
+            
+        except Exception as e:
+            print(f"{LOG_PREFIX} 타임스탬프 정규화 오류 ({timestamp_str}): {e}")
+            return None
+        
+    def precompute_second_timeline(self):
+        """모든 초에 대해 LKV 데이터 미리 할당 - 고성능 사전 계산"""
+        print(f"{LOG_PREFIX} === 초단위 타임라인 사전 계산 시작 ===")
+        
+        if not self._sorted_timestamps:
+            print(f"{LOG_PREFIX} 센서 데이터가 없어 사전 계산을 건너뜁니다.")
+            return
+        
+        self._second_timeline = {}
+        current_lkv_data = None
+        
+        # 시작/끝 시간 확인
+        start_dt = self._parse_timestamp(self._sorted_timestamps[0])
+        end_dt = self._parse_timestamp(self._sorted_timestamps[-1])
+        
+        if not start_dt or not end_dt:
+            print(f"{LOG_PREFIX} 시작/끝 시간 파싱 실패")
+            return
+        
+        print(f"{LOG_PREFIX} 사전 계산 범위: {start_dt} ~ {end_dt}")
+        
+        # 시작 시간부터 끝 시간까지 모든 초 순회
+        current_time = start_dt
+        total_seconds = 0
+        actual_data_count = 0
+        lkv_count = 0
+        
+        while current_time <= end_dt:
+            second_key = current_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            
+            # 실제 센서 데이터가 있으면 LKV 업데이트
+            if second_key in self._sensor_data:
+                current_lkv_data = self._sensor_data[second_key]
+                actual_data_count += 1
+                print(f"{LOG_PREFIX} 실제 데이터 발견: {second_key} ({len(current_lkv_data)}개 센서)")
+            
+            # 현재 초에 LKV 할당 (실제 데이터 또는 이전 데이터)
+            if current_lkv_data:
+                self._second_timeline[second_key] = current_lkv_data
+                if second_key not in self._sensor_data:
+                    lkv_count += 1
+            else:
+                # 아직 데이터가 없는 경우 (시작 지점)
+                self._second_timeline[second_key] = None
+            
+            total_seconds += 1
+            current_time += datetime.timedelta(seconds=1)
+        
+        print(f"{LOG_PREFIX} === 사전 계산 완료 ===")
+        print(f"{LOG_PREFIX} 총 초 수: {total_seconds:,}개")
+        print(f"{LOG_PREFIX} 실제 데이터: {actual_data_count:,}개")
+        print(f"{LOG_PREFIX} LKV 할당: {lkv_count:,}개")
+        print(f"{LOG_PREFIX} 압축 비율: {actual_data_count}/{total_seconds} = {actual_data_count/total_seconds*100:.1f}%")
+        
+        # 메모리 사용량 추정
+        estimated_mb = total_seconds * 0.5 / 1024  # 대략적 추정
+        print(f"{LOG_PREFIX} 예상 메모리 사용량: ~{estimated_mb:.1f} MB")
+
+        
     def _initialize_time_range(self):
         """센서 데이터 기반으로 시간 범위 초기화"""
         try:
-            # timestamp key들에서 최초/최후 타임스탬프 찾기
-            if self._sensor_data:
-                timestamps = sorted(self._sensor_data.keys())
-                first_timestamp = timestamps[0]
-                last_timestamp = timestamps[-1]
+            if self._sorted_timestamps:
+                first_timestamp = self._sorted_timestamps[0]
+                last_timestamp = self._sorted_timestamps[-1]
                 
-                # 타임스탬프 파싱
                 self._start_time = self._parse_timestamp(first_timestamp)
                 self._end_time = self._parse_timestamp(last_timestamp)
                 self._current_time = self._start_time
@@ -414,30 +452,15 @@ class TimeController:
     def _parse_timestamp(self, timestamp_str):
         """타임스탬프 문자열을 datetime으로 파싱"""
         try:
-            # 밀리초가 있는 ISO 형식 (예: 2025-03-26T06:15:48.846Z)
             if "." in timestamp_str and timestamp_str.endswith("Z"):
                 return dt.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S.%fZ")
-            # 밀리초 없는 ISO 형식 (예: 2025-03-26T06:15:48Z)
             elif timestamp_str.endswith("Z"):
                 return dt.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%SZ")
-            # Z 접미사 없는 형식 (예: 2025-03-26T06:15:48)
             else:
                 return dt.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S")
         except Exception as e:
             print(f"{LOG_PREFIX} 타임스탬프 파싱 오류: {e}")
             return None
-    
-    def _find_closest_timestamp(self, target_time):
-        """특정 시간에 가장 가까운 타임스탬프 찾기 (배치 처리용) - 이진 검색 최적화"""
-        if not self._sensor_data:
-            return None
-        
-        # 정렬된 timestamp 목록 캐시
-        if not hasattr(self, '_sorted_timestamps'):
-            self._sorted_timestamps = sorted(self._sensor_data.keys())
-        
-        # 동일한 이진 검색 로직 사용
-        return self._binary_search_closest_timestamp(target_time, self._sorted_timestamps)
     
     def _ensure_base_time(self):
         """시간 관리자가 존재하는지 확인하고, 없으면 생성하고 baseTime 설정"""
@@ -447,38 +470,28 @@ class TimeController:
                 print(f"{LOG_PREFIX} USD Stage를 찾을 수 없음")
                 return
                 
-            # TimeManager가 존재하는지 확인
             time_prim = stage.GetPrimAtPath(self._time_manager_path)
             
-            # TimeManager가 없으면 생성
             if not time_prim or not time_prim.IsValid():
                 print(f"{LOG_PREFIX} TimeManager가 없음. 생성 중: {self._time_manager_path}")
                 
-                # 경로 분리 및 부모 경로 확인
                 parent_path = os.path.dirname(self._time_manager_path)
                 if parent_path != "/":
                     parent_prim = stage.GetPrimAtPath(parent_path)
                     if not parent_prim or not parent_prim.IsValid():
-                        # 부모 경로가 없으면 생성
                         print(f"{LOG_PREFIX} 부모 경로 생성 중: {parent_path}")
                         parent_prim = UsdGeom.Xform.Define(stage, parent_path)
                 
-                # TimeManager 생성
                 time_prim = UsdGeom.Xform.Define(stage, self._time_manager_path)
-                
-                # TimeManager 설명 추가
                 time_prim.SetCustomDataByKey("description", "시간 관리 및 동기화를 위한 객체")
                 time_prim.SetCustomDataByKey("created", dt.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-4] + "Z")
-                
                 print(f"{LOG_PREFIX} TimeManager 생성 완료: {self._time_manager_path}")
             
-            # baseTime이 없으면 설정
             if not time_prim.GetCustomDataByKey("baseTime"):
                 base_time_str = DEFAULT_TIME_CONFIG["base_time"]
                 time_prim.SetCustomDataByKey("baseTime", base_time_str)
                 print(f"{LOG_PREFIX} baseTime 설정: {base_time_str}")
             
-            # 현재 시간도 초기화
             current_time_str = self._current_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-4] + "Z"
             time_prim.SetCustomDataByKey("currentTime", current_time_str)
             
@@ -488,73 +501,9 @@ class TimeController:
             print(f"{LOG_PREFIX} TimeManager 초기화 오류: {e}")
             return False
     
-    def _find_closest_data_entry(self, target_time, sensor_id):
-        """주어진 센서 ID와 시간에 가장 가까운 데이터 항목 찾기 - 최적화된 이진 검색"""
-        if not self._sensor_data:
-            return None
-        
-        # 정렬된 timestamp 목록 캐시 (1번만 생성)
-        if not hasattr(self, '_sorted_timestamps'):
-            self._sorted_timestamps = sorted(self._sensor_data.keys())
-            print(f"{LOG_PREFIX} 타임스탬프 인덱스 생성: {len(self._sorted_timestamps)}개")
-        
-        # 이진 검색으로 가장 가까운 타임스탬프 찾기
-        closest_timestamp = self._binary_search_closest_timestamp(target_time, self._sorted_timestamps)
-        
-        # 해당 타임스탬프에 원하는 센서 데이터가 있는지 확인
-        if closest_timestamp and closest_timestamp in self._sensor_data:
-            sensor_data_at_time = self._sensor_data[closest_timestamp]
-            if sensor_id in sensor_data_at_time:
-                return sensor_data_at_time[sensor_id]
-        
-        return None
-    
-    def _binary_search_closest_timestamp(self, target_time, timestamps):
-        """이진 검색으로 가장 가까운 타임스탬프 찾기 - 직접 최적화"""
-        if not timestamps:
-            return None
-        
-        left, right = 0, len(timestamps) - 1
-        best_timestamp = timestamps[0]
-        best_diff = float('inf')
-        
-        # 이진 검색으로 최소 시간 차이 찾기
-        while left <= right:
-            mid = (left + right) // 2
-            mid_timestamp = timestamps[mid]
-            mid_time = self._parse_timestamp(mid_timestamp)
-            
-            if mid_time:
-                # 시간 차이 계산
-                diff = abs((target_time - mid_time).total_seconds())
-                
-                # 더 가까운 값을 찾으면 업데이트
-                if diff < best_diff:
-                    best_diff = diff
-                    best_timestamp = mid_timestamp
-                
-                # 이진 검색 방향 결정
-                if mid_time < target_time:
-                    left = mid + 1  # 더 큰 시간 쪽으로
-                else:
-                    right = mid - 1  # 더 작은 시간 쪽으로
-            else:
-                # 파싱 실패 시 다음으로 이동
-                left = mid + 1
-        
-        # 디버깅: 검색 결과 로그
-        best_time = self._parse_timestamp(best_timestamp)
-        if best_time:
-            diff_minutes = best_diff / 60.0
-            print(f"{LOG_PREFIX} 이진 검색 결과: 목표={target_time.strftime('%H:%M:%S')}, 찾은={best_time.strftime('%H:%M:%S')}, 차이={diff_minutes:.1f}분")
-        
-        return best_timestamp
-    
     def _update_rack_attributes(self, rack_path, data_entry):
         """랙 객체의 속성 업데이트"""
         if not data_entry:
-            # 데이터가 없으면 속성을 비워두거나 초기화합니다
-            print(f"{LOG_PREFIX} 랙({rack_path})의 데이터 없음, 속성 초기화")
             try:
                 stage = self._usd_context.get_stage()
                 if not stage:
@@ -562,21 +511,15 @@ class TimeController:
                     
                 rack_prim = stage.GetPrimAtPath(rack_path)
                 if not rack_prim or not rack_prim.IsValid():
-                    print(f"{LOG_PREFIX} 랙 객체를 찾을 수 없음: {rack_path}")
                     return
                 
-                # 기존 속성이 있으면 N/A 값으로 표시
                 attr_config = USD_ATTRIBUTE_CONFIG["rack_attributes"]
-                if rack_prim.HasAttribute(attr_config["temperature_cold"]):
-                    rack_prim.CreateAttribute(attr_config["temperature_cold"], Sdf.ValueTypeNames.Float).Set(float('nan'))
-                if rack_prim.HasAttribute(attr_config["temperature_hot"]):
-                    rack_prim.CreateAttribute(attr_config["temperature_hot"], Sdf.ValueTypeNames.Float).Set(float('nan'))
-                if rack_prim.HasAttribute(attr_config["humidity_cold"]):
-                    rack_prim.CreateAttribute(attr_config["humidity_cold"], Sdf.ValueTypeNames.Float).Set(float('nan'))
-                if rack_prim.HasAttribute(attr_config["humidity_hot"]):
-                    rack_prim.CreateAttribute(attr_config["humidity_hot"], Sdf.ValueTypeNames.Float).Set(float('nan'))
+                for attr_name in [attr_config["temperature_cold"], attr_config["temperature_hot"], 
+                                attr_config["humidity_cold"], attr_config["humidity_hot"]]:
+                    if rack_prim.HasAttribute(attr_name):
+                        rack_prim.CreateAttribute(attr_name, Sdf.ValueTypeNames.Float).Set(float('nan'))
                 
-                # 메타데이터도 초기화
+                # 메타데이터 초기화
                 rack_prim.SetCustomDataByKey("temperature_cold", "N/A")
                 rack_prim.SetCustomDataByKey("temperature_hot", "N/A")
                 rack_prim.SetCustomDataByKey("humidity_cold", "N/A")
@@ -598,7 +541,6 @@ class TimeController:
                 print(f"{LOG_PREFIX} 랙 객체를 찾을 수 없음: {rack_path}")
                 return
             
-            # 모든 필드가 있는지 확인하고 기본값 설정
             temp_columns = SENSOR_DATA_CONFIG["temperature_columns"]
             hum_columns = SENSOR_DATA_CONFIG["humidity_columns"]
             
@@ -607,7 +549,6 @@ class TimeController:
             hum1 = data_entry.get(hum_columns["cold"], 0.0)
             hum2 = data_entry.get(hum_columns["hot"], 0.0)
             
-            # 유효한 값인지 확인
             try:
                 temp1 = float(temp1)
                 temp2 = float(temp2)
@@ -617,35 +558,23 @@ class TimeController:
                 print(f"{LOG_PREFIX} 유효하지 않은 데이터 값 - 기본값 사용")
                 temp1 = temp2 = hum1 = hum2 = 0.0
             
-            # 속성 업데이트
             attr_config = USD_ATTRIBUTE_CONFIG["rack_attributes"]
             
-            # Cold Aisle 온도
-            temp1_attr = rack_prim.CreateAttribute(attr_config["temperature_cold"], Sdf.ValueTypeNames.Float)
-            temp1_attr.Set(temp1)
+            # 속성 설정
+            rack_prim.CreateAttribute(attr_config["temperature_cold"], Sdf.ValueTypeNames.Float).Set(temp1)
+            rack_prim.CreateAttribute(attr_config["temperature_hot"], Sdf.ValueTypeNames.Float).Set(temp2)
+            rack_prim.CreateAttribute(attr_config["humidity_cold"], Sdf.ValueTypeNames.Float).Set(hum1)
+            rack_prim.CreateAttribute(attr_config["humidity_hot"], Sdf.ValueTypeNames.Float).Set(hum2)
             
-            # Hot Aisle 온도
-            temp2_attr = rack_prim.CreateAttribute(attr_config["temperature_hot"], Sdf.ValueTypeNames.Float)
-            temp2_attr.Set(temp2)
-            
-            # Cold Aisle 습도
-            hum1_attr = rack_prim.CreateAttribute(attr_config["humidity_cold"], Sdf.ValueTypeNames.Float)
-            hum1_attr.Set(hum1)
-            
-            # Hot Aisle 습도
-            hum2_attr = rack_prim.CreateAttribute(attr_config["humidity_hot"], Sdf.ValueTypeNames.Float)
-            hum2_attr.Set(hum2)
-            
-            # 메타데이터에도 값 추가
+            # 메타데이터 설정
             rack_prim.SetCustomDataByKey("temperature_cold", temp1)
             rack_prim.SetCustomDataByKey("temperature_hot", temp2)
             rack_prim.SetCustomDataByKey("humidity_cold", hum1)
             rack_prim.SetCustomDataByKey("humidity_hot", hum2)
-            rack_prim.SetCustomDataByKey("timestamp", data_entry.get(SENSOR_DATA_CONFIG["timestamp_column"], "Unknown"))
+            rack_prim.SetCustomDataByKey("timestamp", data_entry.get('normalized_timestamp', "Unknown"))
             rack_prim.SetCustomDataByKey("sensor_id", data_entry.get(SENSOR_DATA_CONFIG["obj_id_column"], "Unknown"))
-            
-            # 데이터 출처 명시적으로 기록
             rack_prim.SetCustomDataByKey("data_source", "sensor_data")
+            rack_prim.SetCustomDataByKey("last_updated", datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-4] + "Z")
             
         except Exception as e:
             print(f"{LOG_PREFIX} 객체 속성 업데이트 오류 ({rack_path}): {e}")
@@ -656,87 +585,73 @@ class TimeController:
         if rack_path in self._rack_to_sensor_map:
             return self._rack_to_sensor_map.get(rack_path)
         
-        # 경로 검색 시도
-        # 1. 끝부분 비교
+        # 끝부분 비교
         rack_name = rack_path.split('/')[-1] if '/' in rack_path else rack_path
         for path, sensor_id in self._rack_to_sensor_map.items():
             if path.endswith('/' + rack_name):
                 return sensor_id
         
-        # 2. 몇 가지 경로 변형 시도
+        # 경로 변형 시도
         variations = []
-        
-        # '/World' 접두사가 있으면 제거
         if rack_path.startswith('/World/'):
-            variations.append(rack_path[6:])  # '/World/' 제거
-        # '/World' 접두사가 없으면 추가
+            variations.append(rack_path[6:])
         elif not rack_path.startswith('/World'):
             variations.append('/World' + rack_path)
         
-        # 각 변형에 대해 매핑 확인
         for var_path in variations:
             if var_path in self._rack_to_sensor_map:
                 return self._rack_to_sensor_map.get(var_path)
         
-        # 매핑을 찾지 못한 경우
         return None
     
     def _update_all_racks(self):
-        """모든 랙의 속성 업데이트 - 가장 가까운 데이터 매핑"""
-        updated_count = 0
-        missing_count = 0
+        """고성능 초단위 사전 계산된 데이터로 랙 업데이트"""
         
-        # 사용 가능한 모든 센서 ID 찾기 (캐시)
-        if not hasattr(self, '_available_sensors_cache') or not self._available_sensors_cache:
-            self._available_sensors_cache = set()
-            for sensors_at_time in self._sensor_data.values():
-                self._available_sensors_cache.update(sensors_at_time.keys())
+        # 🎯 핵심: 센티초 무시하고 초단위로 변환
+        current_second = self._current_time.strftime("%Y-%m-%dT%H:%M:%SZ")
         
-        available_sensors = self._available_sensors_cache
+        print(f"{LOG_PREFIX} [고성능] 현재 초: {current_second}")
         
-        # 현재 시간에 가장 가까운 타임스탬프 찾기
-        closest_timestamp = self._find_closest_timestamp(self._current_time)
+        # 🚀 O(1) 직접 조회 - 가장 빠름!
+        second_data = self._second_timeline.get(current_second)
         
-        if closest_timestamp and closest_timestamp in self._sensor_data:
-            sensor_data_at_time = self._sensor_data[closest_timestamp]
-            print(f"{LOG_PREFIX} 가장 가까운 타임스탬프: {closest_timestamp}, 센서 수: {len(sensor_data_at_time)}")
-        else:
-            sensor_data_at_time = None
-            print(f"{LOG_PREFIX} 가장 가까운 타임스탬프를 찾을 수 없음")
-        
-        # 모든 랙 경로 순회
-        for rack_path in self._rack_paths:
-            # 센서 ID 확인
-            sensor_id = self.get_sensor_id_for_rack(rack_path)
+        if second_data:
+            print(f"{LOG_PREFIX} [고성능] ⚡ 사전 계산된 데이터 발견: {len(second_data)}개 센서")
+            updated_count = 0
+            maintained_count = 0
             
-            if sensor_id and sensor_id in available_sensors:
-                # 센서 데이터가 있는 경우 - 가장 가까운 데이터 사용
-                data_entry = None
+            # 모든 랙에 빠르게 적용
+            for rack_path in self._rack_paths:
+                sensor_id = self.get_sensor_id_for_rack(rack_path)
                 
-                if sensor_data_at_time and sensor_id in sensor_data_at_time:
-                    # 배치 처리: 가장 가까운 시간의 센서 데이터 사용
-                    data_entry = sensor_data_at_time[sensor_id]
-                else:
-                    # 폴백: 개별 검색으로 가장 가까운 데이터 찾기
-                    data_entry = self._find_closest_data_entry(self._current_time, sensor_id)
-                
-                if data_entry:
-                    self._update_rack_attributes(rack_path, data_entry)
+                if sensor_id and sensor_id in second_data:
+                    # 사전 계산된 데이터 직접 사용
+                    rack_data = second_data[sensor_id]
+                    self._last_known_values[rack_path] = rack_data  # LKV 업데이트
+                    self._update_rack_attributes(rack_path, rack_data)
                     updated_count += 1
+                    
+                elif rack_path in self._last_known_values:
+                    # 기존 LKV 유지
+                    rack_data = self._last_known_values[rack_path]
+                    self._update_rack_attributes(rack_path, rack_data)
+                    maintained_count += 1
+                    
                 else:
-                    # 데이터를 찾을 수 없는 경우
+                    # 데이터 없음
                     self._update_rack_attributes(rack_path, None)
-                    missing_count += 1
-            else:
-                # 센서 ID가 없거나 데이터가 없는 경우
-                self._update_rack_attributes(rack_path, None)
-                missing_count += 1
-        
-        # 결과 로그
-        if updated_count > 0 or missing_count > 0:
-            print(f"{LOG_PREFIX} 랙 업데이트: {updated_count}개 업데이트, {missing_count}개 데이터 없음")
-        
-        return updated_count
+            
+            print(f"{LOG_PREFIX} [고성능] ⚡ 업데이트 완료: {updated_count}개 새 데이터, {maintained_count}개 LKV 유지")
+            return updated_count
+            
+        else:
+            print(f"{LOG_PREFIX} [고성능] ❌ 사전 계산된 데이터 없음: {current_second}")
+            
+            # 🔍 디버깅: 사용 가능한 시간 확인
+            available_times = list(self._second_timeline.keys())[:5]
+            print(f"{LOG_PREFIX} [고성능] 사용 가능한 시간 (예시): {available_times}")
+            
+            return 0                
     
     def _datetime_to_timecode_value(self, dt_obj):
         """datetime을 USD 타임코드 값(실수)으로 변환"""
@@ -753,7 +668,6 @@ class TimeController:
             return 0.0
         
         try:
-            # 기준 시간 문자열도 동일한 파싱 함수 사용
             base_dt = self._parse_timestamp(base_time_str)
             if not base_dt:
                 raise ValueError(f"Invalid base time format: {base_time_str}")
@@ -782,16 +696,19 @@ class TimeController:
             if stage:
                 time_prim = stage.GetPrimAtPath(self._time_manager_path)
                 if time_prim and time_prim.IsValid():
-                    # 소수점 둘째 자리까지 포함한 시간 포맷 사용
+                    # 센티초 단위 시간 포맷 사용
                     time_str = self._current_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-4] + "Z"
                     time_prim.SetCustomDataByKey("currentTime", time_str)
                     time_prim.SetCustomDataByKey("lastUpdated", datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-4] + "Z")
                     
-                    # 모든 랙 업데이트
+                    # 모든 랙 업데이트 (새로운 정확한 매칭 방식)
                     updated_count = self._update_all_racks()
-                    print(f"{LOG_PREFIX} 업데이트된 랙 수: {updated_count}")
+                    if updated_count > 0:
+                        print(f"{LOG_PREFIX} 새로 업데이트된 랙 수: {updated_count}")
         except Exception as e:
             print(f"{LOG_PREFIX} 시간 관리자 업데이트 오류: {e}")
+    
+    # ========== 시간 제어 메서드들 ==========
     
     def set_time_range(self, start_time, end_time):
         """시간 범위 설정"""
@@ -876,7 +793,8 @@ class TimeController:
         # Stage 업데이트
         self._update_stage_time()
     
-    # Getter 메서드들
+    # ========== Getter 메서드들 ==========
+    
     def get_start_time(self):
         return self._start_time
     
@@ -891,23 +809,6 @@ class TimeController:
     
     def get_playback_speed(self):
         return self._playback_speed
-    
-    def get_current_sensor_data(self):
-        """현재 시간에 해당하는 센서 데이터 가져오기"""
-        sensor_data_map = {}
-        
-        # 사용 가능한 모든 센서 ID 찾기
-        all_sensor_ids = set()
-        for sensors_at_time in self._sensor_data.values():
-            all_sensor_ids.update(sensors_at_time.keys())
-        
-        # 각 센서에 대해 현재 시간에 가장 가까운 데이터 찾기
-        for sensor_id in all_sensor_ids:
-            data_entry = self._find_closest_data_entry(self._current_time, sensor_id)
-            if data_entry:
-                sensor_data_map[sensor_id] = data_entry
-        
-        return sensor_data_map
     
     def get_stage_time(self):
         """현재 Stage 시간 가져오기"""
@@ -936,6 +837,67 @@ class TimeController:
             unique_sensors.update(sensors_at_time.keys())
         return len(unique_sensors)
     
+    # ========== 디버깅 및 정보 메서드들 ==========
+    
+    def get_exact_match_data(self, target_time_str):
+        """특정 시간에 정확히 매칭되는 데이터 반환 (디버깅용)"""
+        return self._sensor_data.get(target_time_str, {})
+    
+    def get_available_timestamps_around(self, target_time_str, window=5):
+        """특정 시간 주변의 사용 가능한 timestamp 반환 (디버깅용)"""
+        if target_time_str in self._sorted_timestamps:
+            idx = self._sorted_timestamps.index(target_time_str)
+            start = max(0, idx - window)
+            end = min(len(self._sorted_timestamps), idx + window + 1)
+            return self._sorted_timestamps[start:end]
+        return []
+    
+    def get_last_known_values_summary(self):
+        """Last known values 상태 요약 (디버깅용)"""
+        summary = {
+            "total_racks": len(self._rack_paths),
+            "racks_with_last_known": len(self._last_known_values),
+            "racks_without_data": len(self._rack_paths) - len(self._last_known_values)
+        }
+        return summary
+    
+    def force_refresh_all_racks(self):
+        """모든 랙의 last known values를 강제로 새로고침"""
+        print(f"{LOG_PREFIX} 모든 랙 강제 새로고침 시작...")
+        self._last_known_values.clear()
+        updated_count = self._update_all_racks()
+        print(f"{LOG_PREFIX} 강제 새로고침 완료: {updated_count}개 랙 업데이트")
+        return updated_count
+    
+    def get_current_matching_status(self):
+        """현재 시간의 매칭 상태 정보 반환 (디버깅용)"""
+        current_stage_time = self._current_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-4] + "Z"
+        
+        status = {
+            "current_stage_time": current_stage_time,
+            "exact_match_exists": current_stage_time in self._sensor_data,
+            "sensor_count_at_time": len(self._sensor_data.get(current_stage_time, {})),
+            "total_timestamps": len(self._sorted_timestamps),
+            "last_known_values_count": len(self._last_known_values)
+        }
+        
+        if status["exact_match_exists"]:
+            status["available_sensors"] = list(self._sensor_data[current_stage_time].keys())
+        
+        return status
+    
+    def print_timestamp_samples(self, count=10):
+        """사용 가능한 timestamp 샘플 출력 (디버깅용)"""
+        print(f"{LOG_PREFIX} === 사용 가능한 Timestamp 샘플 (처음 {count}개) ===")
+        for i, ts in enumerate(self._sorted_timestamps[:count]):
+            sensor_count = len(self._sensor_data[ts])
+            print(f"{LOG_PREFIX} {i+1:2d}. {ts} ({sensor_count}개 센서)")
+        
+        if len(self._sorted_timestamps) > count:
+            print(f"{LOG_PREFIX} ... (총 {len(self._sorted_timestamps)}개 timestamp)")
+    
+    # ========== 종료 및 정리 메서드들 ==========
+    
     def on_shutdown(self):
         """익스텐션 종료 시 정리 작업"""
         print(f"{LOG_PREFIX} 컨트롤러 종료 중...")
@@ -959,6 +921,7 @@ class TimeController:
         print(f"{LOG_PREFIX} 총 랙 경로 수: {len(self._rack_paths)}")
         print(f"{LOG_PREFIX} 매핑된 랙 수: {len(self._rack_to_sensor_map)}")
         print(f"{LOG_PREFIX} 센서 데이터 타임스탬프 수: {len(self._sensor_data)}")
+        print(f"{LOG_PREFIX} 정렬된 타임스탬프 수: {len(self._sorted_timestamps)}")
         
         # 사용 가능한 센서 ID 확인
         available_sensors = set()
@@ -975,8 +938,19 @@ class TimeController:
         if len(self._rack_to_sensor_map) > 5:
             print(f"{LOG_PREFIX}   ... (총 {len(self._rack_to_sensor_map)}개 매핑)")
         
-        # 첫 번째 타임스탬프의 데이터 확인
-        if self._sensor_data:
-            first_timestamp = sorted(self._sensor_data.keys())[0]
+        # 첫 번째와 마지막 타임스탬프 정보
+        if self._sorted_timestamps:
+            print(f"{LOG_PREFIX} 첫 번째 타임스탬프: {self._sorted_timestamps[0]}")
+            print(f"{LOG_PREFIX} 마지막 타임스탬프: {self._sorted_timestamps[-1]}")
+            
+            # 첫 번째 타임스탬프의 센서 데이터 확인
+            first_timestamp = self._sorted_timestamps[0]
             sensors_at_first_time = self._sensor_data[first_timestamp]
             print(f"{LOG_PREFIX} 첫 번째 타임스탬프 ({first_timestamp})의 센서: {list(sensors_at_first_time.keys())[:5]}")
+        
+        # Last known values 상태
+        summary = self.get_last_known_values_summary()
+        print(f"{LOG_PREFIX} Last Known Values: {summary['racks_with_last_known']}/{summary['total_racks']} 랙")
+        # controller.py에 추가할 테스트 함수들
+
+    
