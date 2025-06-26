@@ -342,113 +342,13 @@ class TimeController:
                 print(f"{LOG_PREFIX} 정규화된 시간 범위: {self._sorted_timestamps[0]} ~ {self._sorted_timestamps[-1]}")
             
             # 🚀 핵심: 사전 계산 실행
-            self.precompute_cumulative_lkv_timeline()
-            # self.precompute_second_timeline()
+            self.precompute_second_timeline()
             
         except Exception as e:
             print(f"{LOG_PREFIX} 센서 데이터 로드 오류: {e}")
             self._sensor_data = {}
             self._sorted_timestamps = []
-
-    def precompute_cumulative_lkv_timeline(self):
-        """센서별 누적 LKV로 초단위 타임라인 사전 계산"""
-        print(f"{LOG_PREFIX} === 센서별 누적 LKV 타임라인 계산 시작 ===")
-        
-        if not self._sorted_timestamps:
-            print(f"{LOG_PREFIX} 센서 데이터가 없어 사전 계산을 건너뜁니다.")
-            return
-        
-        # 1. 모든 센서 ID 수집
-        all_sensor_ids = set()
-        for sensors in self._sensor_data.values():
-            all_sensor_ids.update(sensors.keys())
-        
-        print(f"{LOG_PREFIX} 전체 센서 수: {len(all_sensor_ids)}")
-        print(f"{LOG_PREFIX} 센서 ID들: {sorted(all_sensor_ids)}")
-        
-        # 2. 시간 범위 설정
-        start_dt = self._parse_timestamp(self._sorted_timestamps[0])
-        end_dt = self._parse_timestamp(self._sorted_timestamps[-1])
-        
-        if not start_dt or not end_dt:
-            print(f"{LOG_PREFIX} 시간 파싱 실패")
-            return
-        
-        print(f"{LOG_PREFIX} 계산 범위: {start_dt} ~ {end_dt}")
-        
-        # 3. 센서별 LKV 저장소 초기화
-        sensor_lkv = {}  # {sensor_id: 최신_데이터}
-        
-        # 4. 초기 LKV 설정 - 각 센서의 첫 번째 데이터로 초기화
-        print(f"{LOG_PREFIX} 센서별 초기 LKV 설정 중...")
-        for sensor_id in all_sensor_ids:
-            # 각 센서의 첫 번째 등장 시점 찾기
-            for timestamp in self._sorted_timestamps:
-                if sensor_id in self._sensor_data[timestamp]:
-                    sensor_lkv[sensor_id] = self._sensor_data[timestamp][sensor_id]
-                    print(f"{LOG_PREFIX}   {sensor_id}: 초기 LKV 설정 ({timestamp})")
-                    break
-            
-            if sensor_id not in sensor_lkv:
-                print(f"{LOG_PREFIX}   ⚠️  {sensor_id}: 초기 데이터를 찾을 수 없음")
-        
-        # 5. 매 초마다 누적 LKV 계산
-        self._second_timeline = {}
-        current_time = start_dt
-        total_seconds = 0
-        update_events = 0
-        
-        print(f"{LOG_PREFIX} 매 초 누적 LKV 계산 시작...")
-        
-        while current_time <= end_dt:
-            second_key = current_time.strftime("%Y-%m-%dT%H:%M:%SZ")
-            
-            # 현재 시점에 실제 데이터가 있으면 해당 센서들의 LKV 업데이트
-            if second_key in self._sensor_data:
-                current_updates = self._sensor_data[second_key]
-                
-                for sensor_id, new_data in current_updates.items():
-                    if sensor_id in sensor_lkv:  # 알려진 센서만 업데이트
-                        sensor_lkv[sensor_id] = new_data
-                        update_events += 1
-                
-                if len(current_updates) > 0:
-                    updated_sensors = list(current_updates.keys())
-                    print(f"{LOG_PREFIX} {second_key}: {len(current_updates)}개 센서 업데이트 {updated_sensors}")
-            
-            # 현재 시점의 모든 센서 LKV를 second_timeline에 저장
-            self._second_timeline[second_key] = sensor_lkv.copy()  # 깊은 복사 중요!
-            
-            total_seconds += 1
-            current_time += datetime.timedelta(seconds=1)
-            
-            # 진행 상황 출력 (1000초마다)
-            if total_seconds % 1000 == 0:
-                print(f"{LOG_PREFIX} 진행: {total_seconds:,}초 처리 완료...")
-        
-        print(f"{LOG_PREFIX} === 누적 LKV 계산 완료 ===")
-        print(f"{LOG_PREFIX} 총 처리 초 수: {total_seconds:,}")
-        print(f"{LOG_PREFIX} 센서 업데이트 이벤트: {update_events:,}")
-        print(f"{LOG_PREFIX} 센서별 평균 업데이트: {update_events/len(all_sensor_ids):.1f}회")
-        
-        # 6. 검증: 몇 개 시점 확인
-        print(f"\n{LOG_PREFIX} === 누적 LKV 검증 ===")
-        sample_times = [start_dt + datetime.timedelta(seconds=i) for i in [0, 60, 300, 600]]
-        
-        for sample_time in sample_times:
-            sample_key = sample_time.strftime("%Y-%m-%dT%H:%M:%SZ")
-            sample_data = self._second_timeline.get(sample_key)
-            
-            if sample_data:
-                print(f"{LOG_PREFIX} {sample_key}: ✅ {len(sample_data)}개 센서 (전체 센서 커버)")
-                
-                # 첫 3개 센서 샘플 값 확인
-                for i, (sensor_id, data) in enumerate(list(sample_data.items())[:3]):
-                    temp_val = data.get('TEMPERATURE1', 'N/A')
-                    print(f"{LOG_PREFIX}   {sensor_id}: TEMPERATURE1={temp_val}")
-            else:
-                print(f"{LOG_PREFIX} {sample_key}: ❌ 데이터 없음")
-                
+    
     def _normalize_timestamp_to_seconds(self, timestamp_str):
         """타임스탬프를 센티초 단위로 정규화"""
         try:
@@ -707,231 +607,55 @@ class TimeController:
     def _update_all_racks(self):
         """고성능 초단위 사전 계산된 데이터로 랙 업데이트"""
         
-        # # 🎯 핵심: 센티초 무시하고 초단위로 변환
-        # current_second = self._current_time.strftime("%Y-%m-%dT%H:%M:%SZ")
-        
-        # print(f"{LOG_PREFIX} [고성능] 현재 초: {current_second}")
-        
-        # # 🚀 O(1) 직접 조회 - 가장 빠름!
-        # second_data = self._second_timeline.get(current_second)
-        
-        # if second_data:
-        #     print(f"{LOG_PREFIX} [고성능] ⚡ 사전 계산된 데이터 발견: {len(second_data)}개 센서")
-        #     updated_count = 0
-        #     maintained_count = 0
-            
-        #     # 모든 랙에 빠르게 적용
-        #     for rack_path in self._rack_paths:
-        #         sensor_id = self.get_sensor_id_for_rack(rack_path)
-
-        #         # 여기 sensor_id 가 None 이어서 LKV 사용하는건가? 결국 데이터 할당문제
-        #         print(f"[DEBUG] {rack_path} -> sensor_id: {sensor_id}")
-
-        #         if sensor_id and sensor_id in second_data:
-        #             # 사전 계산된 데이터 직접 사용
-        #             rack_data = second_data[sensor_id]
-        #             self._last_known_values[rack_path] = rack_data  # LKV 업데이트
-        #             self._update_rack_attributes(rack_path, rack_data)
-        #             updated_count += 1
-        #             print(f"[DEBUG] ✅ 업데이트 성공: {rack_path}")
-                    
-        #         elif rack_path in self._last_known_values:
-        #             # 기존 LKV 유지
-        #             rack_data = self._last_known_values[rack_path]
-        #             self._update_rack_attributes(rack_path, rack_data)
-        #             maintained_count += 1
-                    
-        #         else:
-        #             # 데이터 없음
-        #             self._update_rack_attributes(rack_path, None)
-            
-        #     print(f"{LOG_PREFIX} [고성능] ⚡ 업데이트 완료: {updated_count}개 새 데이터, {maintained_count}개 LKV 유지")
-        #     return updated_count
-            
-        # else:
-        #     print(f"{LOG_PREFIX} [고성능] ❌ 사전 계산된 데이터 없음: {current_second}")
-            
-        #     # 🔍 디버깅: 사용 가능한 시간 확인
-        #     available_times = list(self._second_timeline.keys())[:5]
-        #     print(f"{LOG_PREFIX} [고성능] 사용 가능한 시간 (예시): {available_times}")
-            
-        #     return 0             
-        return self._update_all_racks_with_debug()
-    
-    def debug_specific_time_data(self, target_time=None):
-        """특정 시점의 second_data 상세 분석"""
-        if target_time is None:
-            target_time = self._current_time
-        
-        # 시간 문자열 변환
-        if isinstance(target_time, str):
-            time_str = target_time
-            target_dt = self._parse_timestamp(target_time)
-        else:
-            time_str = target_time.strftime("%Y-%m-%dT%H:%M:%SZ")
-            target_dt = target_time
-        
-        print(f"\n{LOG_PREFIX} ========== 특정 시점 데이터 분석 ==========")
-        print(f"{LOG_PREFIX} 분석 시점: {time_str}")
-        print(f"{LOG_PREFIX} 현재 컨트롤러 시간: {self._current_time.strftime('%Y-%m-%dT%H:%M:%SZ')}")
-        
-        # 1. _second_timeline에서 데이터 조회
-        second_data = self._second_timeline.get(time_str)
-        
-        print(f"\n{LOG_PREFIX} === _second_timeline 조회 결과 ===")
-        if second_data is None:
-            print(f"{LOG_PREFIX} ❌ second_data: None (데이터 없음)")
-        else:
-            print(f"{LOG_PREFIX} ✅ second_data: {len(second_data)}개 센서 데이터")
-            print(f"{LOG_PREFIX} 센서 ID 목록: {list(second_data.keys())}")
-            
-            # 각 센서 데이터 미리보기
-            for sensor_id, data in list(second_data.items()):  # 처음 3개만
-                # temp_cold = data.get('temp1', 'N/A')
-                # temp_hot = data.get('temp2', 'N/A')
-                print(f"{LOG_PREFIX}   {sensor_id}: data={data}")
-        
-        # 2. 원본 _sensor_data 확인
-        print(f"\n{LOG_PREFIX} === 원본 _sensor_data 확인 ===")
-        original_data = self._sensor_data.get(time_str)
-        if original_data:
-            print(f"{LOG_PREFIX} ✅ 원본 데이터: {len(original_data)}개 센서")
-            print(f"{LOG_PREFIX} 원본 센서 ID: {list(original_data.keys())}")
-        else:
-            print(f"{LOG_PREFIX} ❌ 원본 데이터: 없음")
-        
-        # 3. 랙 매핑 상태 확인
-        print(f"\n{LOG_PREFIX} === 랙 매핑 상태 확인 ===")
-        mapped_racks = 0
-        data_available_racks = 0
-        
-        for rack_path in self._rack_paths[:5]:  # 처음 5개 랙만 확인
-            sensor_id = self.get_sensor_id_for_rack(rack_path)
-            
-            if sensor_id:
-                mapped_racks += 1
-                rack_name = rack_path.split('/')[-1]
-                
-                if second_data and sensor_id in second_data:
-                    data_available_racks += 1
-                    rack_data = second_data[sensor_id]
-                    temp1 = rack_data.get('temp1', 'N/A')
-                    temp2 = rack_data.get('temp2', 'N/A')
-                    print(f"{LOG_PREFIX}   ✅ {rack_name} -> {sensor_id}: temp1={temp1}, temp2={temp2}")
-                else:
-                    print(f"{LOG_PREFIX}   ❌ {rack_name} -> {sensor_id}: 데이터 없음")
-            else:
-                print(f"{LOG_PREFIX}   ❌ {rack_path}: 센서 매핑 없음")
-        
-        print(f"\n{LOG_PREFIX} === 요약 ===")
-        print(f"{LOG_PREFIX} 전체 랙 수: {len(self._rack_paths)}")
-        print(f"{LOG_PREFIX} 매핑된 랙 수: {len(self._rack_to_sensor_map)}")
-        print(f"{LOG_PREFIX} 확인한 랙 중 매핑 성공: {mapped_racks}/5")
-        print(f"{LOG_PREFIX} 확인한 랙 중 데이터 있음: {data_available_racks}/5")
-        
-        # 4. _update_all_racks() 시뮬레이션
-        print(f"\n{LOG_PREFIX} === _update_all_racks() 시뮬레이션 ===")
-        if second_data:
-            print(f"{LOG_PREFIX} ✅ if second_data: 조건 통과 (업데이트 실행됨)")
-            
-            updated_count = 0
-            for rack_path in self._rack_paths:
-                sensor_id = self.get_sensor_id_for_rack(rack_path)
-                if sensor_id and sensor_id in second_data:
-                    updated_count += 1
-            
-            print(f"{LOG_PREFIX} 예상 업데이트 랙 수: {updated_count}/{len(self._rack_paths)}")
-        else:
-            print(f"{LOG_PREFIX} ❌ if second_data: 조건 실패 (업데이트 안됨)")
-        
-        return {
-            'time_str': time_str,
-            'second_data_exists': second_data is not None,
-            'second_data_sensor_count': len(second_data) if second_data else 0,
-            'original_data_exists': original_data is not None,
-            'would_update': second_data is not None
-        }   
-    def debug_time_movement(self, from_time, to_time):
-        """시간 이동 전후 데이터 비교"""
-        print(f"\n{LOG_PREFIX} ========== 시간 이동 디버깅 ==========")
-        
-        # 이동 전 상태
-        print(f"{LOG_PREFIX} === 이동 전: {from_time} ===")
-        before_result = self.debug_specific_time_data(from_time)
-        
-        # 시간 이동
-        if isinstance(to_time, str):
-            to_dt = self._parse_timestamp(to_time)
-        else:
-            to_dt = to_time
-        
-        print(f"\n{LOG_PREFIX} === 시간 이동 실행: {from_time} -> {to_time} ===")
-        self.set_current_time(to_dt)
-        
-        # 이동 후 상태
-        print(f"{LOG_PREFIX} === 이동 후: {to_time} ===")
-        after_result = self.debug_specific_time_data(to_time)
-        
-        # 비교 결과
-        print(f"\n{LOG_PREFIX} === 이동 결과 비교 ===")
-        print(f"{LOG_PREFIX} 이동 전 데이터 있음: {before_result['would_update']}")
-        print(f"{LOG_PREFIX} 이동 후 데이터 있음: {after_result['would_update']}")
-        
-        if before_result['would_update'] != after_result['would_update']:
-            print(f"{LOG_PREFIX} ⚠️  데이터 상태 변화 감지!")
-        
-        return before_result, after_result       
-    
-    def _update_all_racks_with_debug(self):
-        """디버깅이 추가된 _update_all_racks"""
+        # 🎯 핵심: 센티초 무시하고 초단위로 변환
         current_second = self._current_time.strftime("%Y-%m-%dT%H:%M:%SZ")
         
-        print(f"\n{LOG_PREFIX} === _update_all_racks 실행 ===")
-        print(f"{LOG_PREFIX} 현재 시간: {current_second}")
+        print(f"{LOG_PREFIX} [고성능] 현재 초: {current_second}")
         
-        # second_data 조회
+        # 🚀 O(1) 직접 조회 - 가장 빠름!
         second_data = self._second_timeline.get(current_second)
         
         if second_data:
-            print(f"{LOG_PREFIX} ✅ second_data 발견: {len(second_data)}개 센서")
+            print(f"{LOG_PREFIX} [고성능] ⚡ 사전 계산된 데이터 발견: {len(second_data)}개 센서")
             updated_count = 0
             maintained_count = 0
-            failed_count = 0
             
+            # 모든 랙에 빠르게 적용
             for rack_path in self._rack_paths:
                 sensor_id = self.get_sensor_id_for_rack(rack_path)
-                
+
+                # 여기 sensor_id 가 None 이어서 LKV 사용하는건가? 결국 데이터 할당문제
+                print(f"[DEBUG] {rack_path} -> sensor_id: {sensor_id}")
+
                 if sensor_id and sensor_id in second_data:
+                    # 사전 계산된 데이터 직접 사용
                     rack_data = second_data[sensor_id]
-                    self._last_known_values[rack_path] = rack_data
+                    self._last_known_values[rack_path] = rack_data  # LKV 업데이트
                     self._update_rack_attributes(rack_path, rack_data)
                     updated_count += 1
+                
                     
                 elif rack_path in self._last_known_values:
+                    # 기존 LKV 유지
                     rack_data = self._last_known_values[rack_path]
                     self._update_rack_attributes(rack_path, rack_data)
                     maintained_count += 1
                     
                 else:
+                    # 데이터 없음
                     self._update_rack_attributes(rack_path, None)
-                    failed_count += 1
             
-            print(f"{LOG_PREFIX} 업데이트 결과: 새 데이터 {updated_count}, LKV 유지 {maintained_count}, 실패 {failed_count}")
+            print(f"{LOG_PREFIX} [고성능] ⚡ 업데이트 완료: {updated_count}개 새 데이터, {maintained_count}개 LKV 유지")
             return updated_count
             
         else:
-            print(f"{LOG_PREFIX} ❌ second_data 없음: {current_second}")
+            print(f"{LOG_PREFIX} [고성능] ❌ 사전 계산된 데이터 없음: {current_second}")
             
-            # 주변 시간 확인
-            target_dt = self._current_time
-            for offset in [-2, -1, 1, 2]:
-                check_time = target_dt + datetime.timedelta(seconds=offset)
-                check_str = check_time.strftime("%Y-%m-%dT%H:%M:%SZ")
-                check_data = self._second_timeline.get(check_str)
-                status = "있음" if check_data else "없음"
-                print(f"{LOG_PREFIX} {offset:+2d}초 ({check_str}): {status}")
+            # 🔍 디버깅: 사용 가능한 시간 확인
+            available_times = list(self._second_timeline.keys())[:5]
+            print(f"{LOG_PREFIX} [고성능] 사용 가능한 시간 (예시): {available_times}")
             
-            return 0
+            return 0                
     
     def _datetime_to_timecode_value(self, dt_obj):
         """datetime을 USD 타임코드 값(실수)으로 변환"""
@@ -1002,29 +726,15 @@ class TimeController:
         self._update_stage_time()
     
     def set_current_time(self, current_time):
-        # """현재 시간 설정"""
-        # if current_time < self._start_time:
-        #     self._current_time = self._start_time
-        # elif current_time > self._end_time:
-        #     self._current_time = self._end_time
-        # else:
-        #     self._current_time = current_time
-        # self._update_stage_time()
-    
-        """현재 시간 설정 - 디버깅 추가"""
+        """현재 시간 설정"""
         if current_time < self._start_time:
             self._current_time = self._start_time
         elif current_time > self._end_time:
             self._current_time = self._end_time
         else:
             self._current_time = current_time
-        
-        # 🔍 디버깅 추가
-        print(f"{LOG_PREFIX} === 타임 슬라이더 이동: {self._current_time.strftime('%Y-%m-%dT%H:%M:%SZ')} ===")
-        self.debug_specific_time_data()  # 자동 디버깅
-        
         self._update_stage_time()
-
+    
     def set_progress(self, progress):
         """진행도(0.0-1.0)를 기반으로 현재 시간 설정"""
         if progress < 0.0:

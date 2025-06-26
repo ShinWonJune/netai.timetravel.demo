@@ -404,6 +404,9 @@ class TimeWindowUI:
             
             # 슬라이더 업데이트
             self._time_slider.model.set_value(self._controller.get_progress())
+
+            # UI 업데이트
+            self._update_selected_rack_data()
             
         except Exception as e:
             print(f"[netai.timetravel.demo] Error setting specific time: {e}")
