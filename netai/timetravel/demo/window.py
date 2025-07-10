@@ -188,7 +188,7 @@ class TimeWindowUI:
                     # 슬라이더
                     self._time_slider = ui.FloatSlider(min=0.0, max=1.0, width=480)
                     self._time_slider.model.set_value(self._controller.get_progress())
-                    self._time_slider.model.add_value_changed_fn(self._on_slider_changed)
+                    self._time_slider.model.add_value_changed_fn(self._on_slider_changed) # 슬라이더 값 변경 시 호출 (콜백)
                     
                     # 오른쪽 여백
                     ui.Spacer(width=20)
@@ -426,9 +426,9 @@ class TimeWindowUI:
     
     def _on_slider_changed(self, model):
         """Slider value change handler"""
-        if not self._controller.is_playing():  # Only update when not playing
-            progress = model.get_value_as_float()
-            self._controller.set_progress(progress)
+        # if not self._controller.is_playing():  # Only update when not playing
+        progress = model.get_value_as_float()
+        self._controller.set_progress(progress)
     
     def _on_speed_changed(self, model):
         """Speed value change handler"""

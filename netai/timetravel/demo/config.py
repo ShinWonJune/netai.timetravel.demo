@@ -88,3 +88,40 @@ DEFAULT_TIME_CONFIG = {
     "default_start": "2025-03-26T00:00:00",
     "default_end": "2025-03-27T00:00:00"
 }
+
+OBJ_IDS = [
+     20,  21,  22,  23,  24,  25,
+    191, 192, 193, 194, 195, 196,
+    197, 198, 199, 200, 201, 202,
+    203, 204, 205, 206, 207, 208
+]
+
+# List of 24 Air_Rack paths:
+AIR_RACK_PATHS = [
+    "/Root/Air_Rack",
+    "/Root/Air_Rack_01",
+    "/Root/Air_Rack_02",
+    "/Root/Air_Rack_03",
+    "/Root/Air_Rack_04",
+    "/Root/Air_Rack_05",
+    "/Root/Air_Rack_06",
+    "/Root/Air_Rack_07",
+    "/Root/Air_Rack_08",
+    "/Root/Air_Rack_09",
+    "/Root/Air_Rack_10",
+    "/Root/Air_Rack_11",
+    "/Root/Air_Rack_12",
+    "/Root/Air_Rack_13",
+    "/Root/Air_Rack_14",
+    "/Root/Air_Rack_15",
+    "/Root/Air_Rack_16",
+    "/Root/Air_Rack_17",
+    "/Root/Air_Rack_18",
+    "/Root/Air_Rack_19",
+    "/Root/Air_Rack_20",
+    "/Root/Air_Rack_21",
+    "/Root/Air_Rack_22",
+    "/Root/Air_Rack_23",
+]
+
+objid_to_airrack = dict(zip(OBJ_IDS, AIR_RACK_PATHS))
