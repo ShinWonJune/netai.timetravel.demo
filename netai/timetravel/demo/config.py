@@ -65,7 +65,7 @@ SENSOR_DATA_CONFIG = {
 
 # USD 속성 설정
 USD_ATTRIBUTE_CONFIG = {
-    "time_manager_path": "/World/TimeManager",
+    "time_manager_path": "/Root/TimeManager",
     "rack_attributes": {
         "temperature_cold": "temperature_cold",
         "temperature_hot": "temperature_hot", 

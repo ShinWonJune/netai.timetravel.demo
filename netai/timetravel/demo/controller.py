@@ -23,123 +23,6 @@ from .config import (
     objid_to_airrack,
 )
 
-def update_dynamic_colormap(temperature, color_rgba_cl,prefix_prim_path):
-    """
-    Updates the colormap based on the given temperature.
-    
-    The temperature is assumed to be in °C and clamped between 15°C (cold) and 30°C (hot).
-    It interpolates between the static cold and hot colormaps.
-    
-    Static colormaps (flat RGBA arrays) are defined as follows:
-    
-      Static Cold:
-         flat_rgba_cold = [
-             0.943, 0.961, 0.961, 0.7, 
-             0.569, 0.906, 0.271, 1.0,
-             0.258, 0.816, 0.915, 0.9, 
-             0.085, 0.373, 0.876, 1.0   
-         ]
-    
-      Static Hot:
-         flat_rgba_hot = [
-             0.943, 0.961, 0.961, 0.7,  
-             0.569, 0.906, 0.271, 1.0,
-             0.931, 0.814, 0.115, 1.0, 
-             0.907, 0.060, 0.060, 1.0   
-         ]
-    
-    The xPoints (positions) remain fixed.
-    """
-    print("Updating dynamic colormap for temperature:", temperature)
-    
-    # Clamp temperature to the [15, 30] range:
-    # T_min = 15.0
-    # T_max = 30.0
-    # T = max(T_min, min(temperature, T_max))
-    # alpha = (T - T_min) / (T_max - T_min)
-    
-   
-    flat_rgba = [
-        0.943, 0.961, 0.961, 0.7,  
-        0.569, 0.906, 0.271, 1.0,
-        0.931, 0.814, 0.115, 1.0, 
-        0.907, 0.060, 0.060, 1.0   
-    ]
-    colormap_prim_paths = [
-        "/Steam_01/flowOffscreen/colormap",
-        "/Steam_02/flowOffscreen/colormap",
-        "/Steam_03/flowOffscreen/colormap"
-    ]
-    #Interpolate between cold and hot for each stop.
-    ind = 0
-    for ind in range(3):
-        steam_temperature = temperature - ind*0.8
-        if ind > 0:
-            computed_color = compute_color_from_temperature(steam_temperature)
-        else:
-            computed_color = color_rgba_cl
-        flat_rgba[-4:] = list(computed_color)
-        
-        # Convert flat_rgba into a list of Gf.Vec4f objects.
-        from pxr import Vt, Gf
-        vec_list = [Gf.Vec4f(flat_rgba[i], flat_rgba[i+1], flat_rgba[i+2], flat_rgba[i+3])
-                    for i in range(0, len(flat_rgba), 4)]
-        new_rgbaPoints = Vt.Vec4fArray(vec_list)
-
-    
-        new_xPoints = [0.1563, 0.3885, 0.5862, 0.80139]
-        
-        prm_path = prefix_prim_path+colormap_prim_paths[ind]
-
-        # Update the USD attributes on the colormap prim
-        stage = omni.usd.get_context().get_stage()
-        prim = stage.GetPrimAtPath(prm_path)
-        if not prim.IsValid():
-            print("Colormap prim not found at:", prm_path)
-            return
-        
-        xPoints_attr = prim.GetAttribute("xPoints")
-        if xPoints_attr.IsValid():
-            xPoints_attr.Set(new_xPoints)
-            print("xPoints updated:", new_xPoints)
-        else:
-            print("xPoints attribute not found on prim.")
-        
-        rgbaPoints_attr = prim.GetAttribute("rgbaPoints")
-        if rgbaPoints_attr.IsValid():
-            rgbaPoints_attr.Set(new_rgbaPoints)
-            print("rgbaPoints updated:", new_rgbaPoints)
-        else:
-            print("rgbaPoints attribute not found on prim.")
-        
-        
-# --- Color‐mapping function (unchanged) ---
-def compute_color_from_temperature(T):
-    # Clamp input to [19.0, 24.0]
-    if T < 19.0:
-        T = 19.0
-    elif T > 24.0:
-        T = 24.0
-
-    stops = [
-        (19.0, (0.085, 0.373, 0.876, 1.0)),
-        (20.0, (0.258, 0.816, 0.915, 0.9)),
-        (21.0, (0.500, 0.900, 0.600, 1.0)),
-        (22.0, (0.569, 0.906, 0.271, 1.0)),
-        (23.0, (0.931, 0.814, 0.115, 1.0)),
-        (24.0, (0.907, 0.060, 0.060, 1.0))
-    ]
-
-    for i in range(len(stops) - 1):
-        T_low, color_low = stops[i]
-        T_high, color_high = stops[i + 1]
-        if T_low <= T <= T_high:
-            f = (T - T_low) / (T_high - T_low)
-            r = (1 - f) * color_low[0] + f * color_high[0]
-            g = (1 - f) * color_low[1] + f * color_high[1]
-            b = (1 - f) * color_low[2] + f * color_high[2]
-            a = (1 - f) * color_low[3] + f * color_high[3]
-            return (r, g, b, a)
 
 
 class TimeController:
@@ -174,7 +57,9 @@ class TimeController:
         self._last_known_values = {}  # 각 랙의 마지막 알려진 값 저장
         self._load_sensor_data()
         
-
+        # 속성 캐시 초기화
+        self._rack_attribute_cache = {}  
+        self._rackprim_cache = {}  
 
         # 센서 데이터 기반으로 시간 범위 초기화
         self._initialize_time_range()
@@ -212,8 +97,7 @@ class TimeController:
         
         # 가능한 랙 경로 패턴
         rack_patterns = [
-            "/Root/datacenter/RACK_*",
-            "/World/Root/datacenter/RACK_*"
+            "/Root/datacenter/RACK_*"
         ]
         
         for pattern in rack_patterns:
@@ -228,19 +112,23 @@ class TimeController:
                     continue
                 
                 initialized_count = 0
+                
                 for child_prim in datacenter_prim.GetChildren():
                     child_name = child_prim.GetName()
                     if child_name.startswith("RACK_"):
                         rack_path = f"{base_path}{child_name}"
+                        print(f"{LOG_PREFIX} 랙 경로 검색 중: {rack_path}")
                         self._reset_rack_attributes(rack_path)
                         initialized_count += 1
                 
                 if initialized_count > 0:
                     print(f"{LOG_PREFIX} {base_path} 경로에서 {initialized_count}개 랙 속성 초기화 완료")
-                
+
             except Exception as e:
                 print(f"{LOG_PREFIX} 랙 검색 중 오류: {e}")
-    
+
+
+
     def _reset_rack_attributes(self, rack_path):
         """특정 랙의 속성을 초기화"""
         try:
@@ -724,33 +612,8 @@ class TimeController:
     def _update_rack_attributes(self, rack_path, data_entry):
         """랙 객체의 속성 업데이트"""
         if not data_entry:
-            try:
-                stage = self._usd_context.get_stage()
-                if not stage:
-                    return
-                    
-                rack_prim = stage.GetPrimAtPath(rack_path)
-                if not rack_prim or not rack_prim.IsValid():
-                    return              
-                #print(f"{rack_path}=====CheckingRACK===  ")
-                attr_config = USD_ATTRIBUTE_CONFIG["rack_attributes"]
-                for attr_name in [attr_config["temperature_cold"], attr_config["temperature_hot"], 
-                                attr_config["humidity_cold"], attr_config["humidity_hot"]]:
-                    if rack_prim.HasAttribute(attr_name):
-                        rack_prim.CreateAttribute(attr_name, Sdf.ValueTypeNames.Float).Set(float('nan'))
-                
-                # 메타데이터 초기화
-                rack_prim.SetCustomDataByKey("temperature_cold", "N/A")
-                rack_prim.SetCustomDataByKey("temperature_hot", "N/A")
-                rack_prim.SetCustomDataByKey("humidity_cold", "N/A")
-                rack_prim.SetCustomDataByKey("humidity_hot", "N/A")
-                rack_prim.SetCustomDataByKey("timestamp", "N/A")
-                rack_prim.SetCustomDataByKey("sensor_id", "None")
-                
-            except Exception as e:
-                print(f"{LOG_PREFIX} 객체 속성 초기화 오류 ({rack_path}): {e}")
+            # 데이터 없으면 아무것도 하지 않음
             return
-            
         try:
             stage = self._usd_context.get_stage()
             if not stage:
@@ -758,8 +621,8 @@ class TimeController:
                 
             rack_prim = stage.GetPrimAtPath(rack_path)
             if not rack_prim or not rack_prim.IsValid():
-                print(f"{LOG_PREFIX} 랙 객체를 찾을 수 없음: {rack_path}")
-                return
+                return              
+            
             
             temp_columns = SENSOR_DATA_CONFIG["temperature_columns"]
             hum_columns = SENSOR_DATA_CONFIG["humidity_columns"]
@@ -781,10 +644,15 @@ class TimeController:
             attr_config = USD_ATTRIBUTE_CONFIG["rack_attributes"]
             
             # 속성 설정
-            rack_prim.CreateAttribute(attr_config["temperature_cold"], Sdf.ValueTypeNames.Float).Set(temp1)
-            rack_prim.CreateAttribute(attr_config["temperature_hot"], Sdf.ValueTypeNames.Float).Set(temp2)
-            rack_prim.CreateAttribute(attr_config["humidity_cold"], Sdf.ValueTypeNames.Float).Set(hum1)
-            rack_prim.CreateAttribute(attr_config["humidity_hot"], Sdf.ValueTypeNames.Float).Set(hum2)
+            temp_cold_attr = rack_prim.GetAttribute(attr_config["temperature_cold"])
+            temp_hot_attr = rack_prim.GetAttribute(attr_config["temperature_hot"])  
+            hum_cold_attr = rack_prim.GetAttribute(attr_config["humidity_cold"])
+            hum_hot_attr = rack_prim.GetAttribute(attr_config["humidity_hot"])
+            
+            temp_cold_attr.Set(temp1)
+            temp_hot_attr.Set(temp2)
+            hum_cold_attr.Set(hum1)
+            hum_hot_attr.Set(hum2)
             
             # 메타데이터 설정
             rack_prim.SetCustomDataByKey("temperature_cold", temp1)
@@ -1401,4 +1269,122 @@ class TimeController:
         print(f"{LOG_PREFIX} Last Known Values: {summary['racks_with_last_known']}/{summary['total_racks']} 랙")
         # controller.py에 추가할 테스트 함수들
 
+# --- Dynamic colormap update function ----------------------------------------------
+    # --- Color‐mapping function (unchanged) ---
+    def compute_color_from_temperature(T):
+        # Clamp input to [19.0, 24.0]
+        if T < 19.0:
+            T = 19.0
+        elif T > 24.0:
+            T = 24.0
+
+        stops = [
+            (19.0, (0.085, 0.373, 0.876, 1.0)),
+            (20.0, (0.258, 0.816, 0.915, 0.9)),
+            (21.0, (0.500, 0.900, 0.600, 1.0)),
+            (22.0, (0.569, 0.906, 0.271, 1.0)),
+            (23.0, (0.931, 0.814, 0.115, 1.0)),
+            (24.0, (0.907, 0.060, 0.060, 1.0))
+        ]
+
+        for i in range(len(stops) - 1):
+            T_low, color_low = stops[i]
+            T_high, color_high = stops[i + 1]
+            if T_low <= T <= T_high:
+                f = (T - T_low) / (T_high - T_low)
+                r = (1 - f) * color_low[0] + f * color_high[0]
+                g = (1 - f) * color_low[1] + f * color_high[1]
+                b = (1 - f) * color_low[2] + f * color_high[2]
+                a = (1 - f) * color_low[3] + f * color_high[3]
+                return (r, g, b, a)
     
+    def update_dynamic_colormap(temperature, color_rgba_cl,prefix_prim_path):
+        """
+        Updates the colormap based on the given temperature.
+        
+        The temperature is assumed to be in °C and clamped between 15°C (cold) and 30°C (hot).
+        It interpolates between the static cold and hot colormaps.
+        
+        Static colormaps (flat RGBA arrays) are defined as follows:
+        
+        Static Cold:
+            flat_rgba_cold = [
+                0.943, 0.961, 0.961, 0.7, 
+                0.569, 0.906, 0.271, 1.0,
+                0.258, 0.816, 0.915, 0.9, 
+                0.085, 0.373, 0.876, 1.0   
+            ]
+        
+        Static Hot:
+            flat_rgba_hot = [
+                0.943, 0.961, 0.961, 0.7,  
+                0.569, 0.906, 0.271, 1.0,
+                0.931, 0.814, 0.115, 1.0, 
+                0.907, 0.060, 0.060, 1.0   
+            ]
+        
+        The xPoints (positions) remain fixed.
+        """
+        print("Updating dynamic colormap for temperature:", temperature)
+        
+        # Clamp temperature to the [15, 30] range:
+        # T_min = 15.0
+        # T_max = 30.0
+        # T = max(T_min, min(temperature, T_max))
+        # alpha = (T - T_min) / (T_max - T_min)
+        
+    
+        flat_rgba = [
+            0.943, 0.961, 0.961, 0.7,  
+            0.569, 0.906, 0.271, 1.0,
+            0.931, 0.814, 0.115, 1.0, 
+            0.907, 0.060, 0.060, 1.0   
+        ]
+        colormap_prim_paths = [
+            "/Steam_01/flowOffscreen/colormap",
+            "/Steam_02/flowOffscreen/colormap",
+            "/Steam_03/flowOffscreen/colormap"
+        ]
+        #Interpolate between cold and hot for each stop.
+        ind = 0
+        for ind in range(3):
+            steam_temperature = temperature - ind*0.8
+            if ind > 0:
+                computed_color = compute_color_from_temperature(steam_temperature)
+            else:
+                computed_color = color_rgba_cl
+            flat_rgba[-4:] = list(computed_color)
+            
+            # Convert flat_rgba into a list of Gf.Vec4f objects.
+            from pxr import Vt, Gf
+            vec_list = [Gf.Vec4f(flat_rgba[i], flat_rgba[i+1], flat_rgba[i+2], flat_rgba[i+3])
+                        for i in range(0, len(flat_rgba), 4)]
+            new_rgbaPoints = Vt.Vec4fArray(vec_list)
+
+        
+            new_xPoints = [0.1563, 0.3885, 0.5862, 0.80139]
+            
+            prm_path = prefix_prim_path+colormap_prim_paths[ind]
+
+            # Update the USD attributes on the colormap prim
+            stage = omni.usd.get_context().get_stage()
+            prim = stage.GetPrimAtPath(prm_path)
+            if not prim.IsValid():
+                print("Colormap prim not found at:", prm_path)
+                return
+            
+            xPoints_attr = prim.GetAttribute("xPoints")
+            if xPoints_attr.IsValid():
+                xPoints_attr.Set(new_xPoints)
+                print("xPoints updated:", new_xPoints)
+            else:
+                print("xPoints attribute not found on prim.")
+            
+            rgbaPoints_attr = prim.GetAttribute("rgbaPoints")
+            if rgbaPoints_attr.IsValid():
+                rgbaPoints_attr.Set(new_rgbaPoints)
+                print("rgbaPoints updated:", new_rgbaPoints)
+            else:
+                print("rgbaPoints attribute not found on prim.")
+            print(f"Updated colormap for {prm_path} with temperature {steam_temperature}°C: {computed_color}")
+        
