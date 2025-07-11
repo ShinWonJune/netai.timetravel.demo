@@ -36,6 +36,9 @@ class TimeController:
         # 타임라인 인터페이스 가져오기
         self._timeline = omni.timeline.get_timeline_interface()
         
+        # Stage 캐싱
+        self._setup_stage_caching()
+        
         # 시간 관리자 경로 초기화
         self._time_manager_path = USD_ATTRIBUTE_CONFIG["time_manager_path"]
         
@@ -86,11 +89,27 @@ class TimeController:
         # 디버깅: 매핑 상태 출력
         self._debug_mapping_status()
     
+    def _setup_stage_caching(self):
+        """ Stage 캐싱 설정 """
+        
+        self._cached_stage = None
+        
+        # 초기 stage 캐싱
+        self._cached_stage = self._usd_context.get_stage()
+    
+    def _get_stage(self):
+        """ Stage 조회, 캐시가 없으면 새로 가져오기 """
+        if self._cached_stage:
+            return self._cached_stage
+        
+        # 캐시가 없으면 직접 조회
+        return self._usd_context.get_stage()
+
     def _initialize_rack_attributes(self):
         """스테이지에서 모든 랙을 검색하고 속성을 초기화"""
         print(f"{LOG_PREFIX} 기존 랙 속성 초기화 중...")
         
-        stage = self._usd_context.get_stage()
+        stage = self._get_stage()
         if not stage:
             print(f"{LOG_PREFIX} 스테이지를 찾을 수 없어 초기화를 건너뜁니다.")
             return
@@ -132,7 +151,7 @@ class TimeController:
     def _reset_rack_attributes(self, rack_path):
         """특정 랙의 속성을 초기화"""
         try:
-            stage = self._usd_context.get_stage()
+            stage = self._get_stage()
             if not stage:
                 return
                 
@@ -216,7 +235,7 @@ class TimeController:
         """정의된 랙 경로를 기반으로 실제 랙 경로 찾기"""
         print(f"{LOG_PREFIX} 정의된 랙 경로 검색 중...")
         
-        stage = self._usd_context.get_stage()
+        stage = self._get_stage()
         real_paths = []
         
         if stage:
@@ -247,7 +266,7 @@ class TimeController:
         predefined_mapping = RACK_SENSOR_MAPPING
         self._rack_to_sensor_map.clear()
         
-        stage = self._usd_context.get_stage()
+        stage = self._get_stage()
         mapped_count = 0
         
         for defined_path, sensor_id in predefined_mapping.items():
@@ -573,7 +592,7 @@ class TimeController:
     def _ensure_base_time(self):
         """시간 관리자가 존재하는지 확인하고, 없으면 생성하고 baseTime 설정"""
         try:
-            stage = self._usd_context.get_stage()
+            stage = self._get_stage()
             if not stage:
                 print(f"{LOG_PREFIX} USD Stage를 찾을 수 없음")
                 return
@@ -610,12 +629,17 @@ class TimeController:
             return False
     
     def _update_rack_attributes(self, rack_path, data_entry):
-        """랙 객체의 속성 업데이트"""
+        """
+        
+        새로운 데이터가 입력될 경우 랙 객체의 속성 업데이트
+        값이 똑같을 경우에는 업데이트 하지 않음
+
+        """
         if not data_entry:
             # 데이터 없으면 아무것도 하지 않음
             return
         try:
-            stage = self._usd_context.get_stage()
+            stage = self._get_stage()
             if not stage:
                 return
                 
@@ -648,21 +672,39 @@ class TimeController:
             temp_hot_attr = rack_prim.GetAttribute(attr_config["temperature_hot"])  
             hum_cold_attr = rack_prim.GetAttribute(attr_config["humidity_cold"])
             hum_hot_attr = rack_prim.GetAttribute(attr_config["humidity_hot"])
+
+            current_temp_cold = temp_cold_attr.Get()
+            current_temp_hot = temp_hot_attr.Get()
+            current_hum_cold = hum_cold_attr.Get()
+            current_hum_hot = hum_hot_attr.Get()
             
-            temp_cold_attr.Set(temp1)
-            temp_hot_attr.Set(temp2)
-            hum_cold_attr.Set(hum1)
-            hum_hot_attr.Set(hum2)
+            if current_temp_cold != temp1:
+                temp_cold_attr.Set(temp1)    
+            if current_temp_hot != temp2:
+                temp_hot_attr.Set(temp2)
+            if current_hum_cold != hum1:
+                hum_cold_attr.Set(hum1)
+            if current_hum_hot != hum2:
+                hum_hot_attr.Set(hum2)
+
             
             # 메타데이터 설정
-            rack_prim.SetCustomDataByKey("temperature_cold", temp1)
-            rack_prim.SetCustomDataByKey("temperature_hot", temp2)
-            rack_prim.SetCustomDataByKey("humidity_cold", hum1)
-            rack_prim.SetCustomDataByKey("humidity_hot", hum2)
-            rack_prim.SetCustomDataByKey("timestamp", data_entry.get('normalized_timestamp', "Unknown"))
-            rack_prim.SetCustomDataByKey("sensor_id", data_entry.get(SENSOR_DATA_CONFIG["obj_id_column"], "Unknown"))
-            rack_prim.SetCustomDataByKey("data_source", "sensor_data")
-            rack_prim.SetCustomDataByKey("last_updated", datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-4] + "Z")
+            metadata = {
+            "temperature_cold": temp1,
+            "temperature_hot": temp2,
+            "humidity_cold": hum1,
+            "humidity_hot": hum2,
+            "timestamp": data_entry.get('normalized_timestamp', "Unknown"),
+            "sensor_id": data_entry.get(SENSOR_DATA_CONFIG["obj_id_column"], "Unknown")
+            }
+
+            for key, value in metadata.items():
+                current_value = rack_prim.GetCustomDataByKey(key)
+                if current_value != value:
+                    rack_prim.SetCustomDataByKey(key, value)
+                    print(f"{LOG_PREFIX} {rack_path} 속성 업데이트: {key} = {value}")
+
+
             normalized_path = rack_path.replace("/Root", "")
 
             # Step 2: Lookup and convert obj_id
@@ -957,7 +999,7 @@ class TimeController:
     
     def _datetime_to_timecode_value(self, dt_obj):
         """datetime을 USD 타임코드 값(실수)으로 변환"""
-        stage = self._usd_context.get_stage()
+        stage = self._get_stage()
         if not stage:
             return 0.0
         
@@ -985,16 +1027,16 @@ class TimeController:
         # 날짜/시간에서 타임코드 값(실수)으로 직접 변환
         timecode_value = self._datetime_to_timecode_value(self._current_time)
         
-        # 타임라인 인터페이스를 통한 시간 설정
+        # 타임라인 인터페이스 (타임 슬라이더 UI)를 self._current_time으로 업데이트
         try:
             self._timeline.set_current_time(timecode_value)
             print(f"{LOG_PREFIX} 타임라인 시간 설정: {timecode_value}")
         except Exception as e:
             print(f"{LOG_PREFIX} 타임라인 업데이트 오류: {e}")
         
-        # 시간 관리자 업데이트 (메타데이터)
+        # 시간 관리자 업데이트 (메타데이터 업데이트트)
         try:
-            stage = self._usd_context.get_stage()
+            stage = self._get_stage()
             if stage:
                 time_prim = stage.GetPrimAtPath(self._time_manager_path)
                 if time_prim and time_prim.IsValid():
@@ -1003,7 +1045,7 @@ class TimeController:
                     time_prim.SetCustomDataByKey("currentTime", time_str)
                     time_prim.SetCustomDataByKey("lastUpdated", datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-4] + "Z")
                     
-                    # 모든 랙 업데이트 (새로운 정확한 매칭 방식)
+                    # 모든 랙 업데이트 
                     updated_count = self._update_all_racks()
                     if updated_count > 0:
                         print(f"{LOG_PREFIX} 새로 업데이트된 랙 수: {updated_count}")
@@ -1128,7 +1170,7 @@ class TimeController:
     
     def get_stage_time(self):
         """현재 Stage 시간 가져오기"""
-        stage = self._usd_context.get_stage()
+        stage = self._get_stage()
         if not stage:
             return "Stage를 찾을 수 없음"
         
