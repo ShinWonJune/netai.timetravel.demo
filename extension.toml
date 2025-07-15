@@ -14,30 +14,32 @@ icon = "data/icon.png"
 "omni.ui" = {}
 "omni.timeline" = {}
 "omni.kit.pip_archive" = {}
+"omni.kit.pipapi" = {}  # 이것이 중요!
 
 [[python.module]]
 name = "netai.timetravel.demo"
 
-# Python pip packages for high-performance data processing
-[[python.pip_packages]]
-name = "numpy"
-version = ">=1.21.0"
+# 올바른 pip 패키지 설정 방식
+[python.pipapi]
+requirements = [
+    "numpy>=1.21.0",
+    "pandas>=1.3.0", 
+    "pyarrow>=6.0.0",
+    "minio>=7.1.0",
+    "psutil>=5.8.0"
+]
 
-[[python.pip_packages]]
-name = "pandas"
-version = ">=1.3.0"
+modules = [
+    "numpy",
+    "pandas", 
+    "pyarrow",
+    "minio",
+    "psutil"
+]
 
-[[python.pip_packages]]
-name = "pyarrow"
-version = ">=6.0.0"
-
-[[python.pip_packages]]
-name = "minio"
-version = ">=7.1.0"
-
-[[python.pip_packages]]
-name = "psutil"
-version = ">=5.8.0"
+use_online_index = true
+ignore_import_check = false
+extra_args = ["--no-cache-dir", "--disable-pip-version-check"]
 
 [settings]
 exts."netai.timetravel.demo".enabled = true
