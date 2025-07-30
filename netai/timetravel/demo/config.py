@@ -50,8 +50,8 @@ POSSIBLE_PATH_PREFIXES = [
 
 # 센서 데이터 파일 설정
 SENSOR_DATA_CONFIG = {
-    "csv_file": "fms_temphum_0327.csv",
-    "timestamp_column": "@timestamp",
+    "csv_file": "20250615_20250721.csv",
+    "timestamp_column": "timestamp",
     "obj_id_column": "objId",
     "temperature_columns": {
         "cold": "TEMPERATURE1",
