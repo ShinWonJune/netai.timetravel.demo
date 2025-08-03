@@ -1,0 +1,45 @@
+[package]
+version = "1.0.0"
+title = "Time Travel Demo"
+description = "High-performance time travel extension for datacenter digital twin with sensor data visualization"
+authors = ["NetAI Team"]
+repository = ""
+keywords = ["time", "travel", "sensor", "datacenter", "digital", "twin", "fms"]
+category = "Simulation"
+icon = "data/icon.png"
+
+[dependencies]
+"omni.kit.uiapp" = {}
+"omni.usd" = {}
+"omni.ui" = {}
+"omni.timeline" = {}
+"omni.kit.pip_archive" = {}
+"omni.kit.pipapi" = {}  # 이것이 중요!
+
+[[python.module]]
+name = "netai.timetravel.demo"
+
+# 올바른 pip 패키지 설정 방식
+[python.pipapi]
+requirements = [
+    "numpy>=1.21.0",
+    "pandas>=1.3.0", 
+    "pyarrow>=6.0.0",
+    "minio>=7.1.0",
+    "psutil>=5.8.0"
+]
+
+modules = [
+    "numpy",
+    "pandas", 
+    "pyarrow",
+    "minio",
+    "psutil"
+]
+
+use_online_index = true
+ignore_import_check = false
+extra_args = ["--no-cache-dir", "--disable-pip-version-check"]
+
+[settings]
+exts."netai.timetravel.demo".enabled = true
